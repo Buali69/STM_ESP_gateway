@@ -1,0 +1,95 @@
+# Build outputs
+build/
+**/build/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.obj
+*.d
+*.lst
+*.su
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+cmake_install.cmake
+.ninja_*
+*.ninja
+
+# ESP-IDF
+sdkconfig.old
+managed_components/
+dependencies.lock
+.project_description.json
+
+# STM32/CubeIDE
+.metadata/
+.settings/
+.cproject
+.project
+*.launch
+Debug/
+Release/
+
+# OS / Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets / local config
+.env
+*.pem
+*.key# Build outputs
+build/
+**/build/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.obj
+*.d
+*.lst
+*.su
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+cmake_install.cmake
+.ninja_*
+*.ninja
+
+# ESP-IDF
+sdkconfig.old
+managed_components/
+dependencies.lock
+.project_description.json
+
+# STM32/CubeIDE
+.metadata/
+.settings/
+.cproject
+.project
+*.launch
+Debug/
+Release/
+
+# OS / Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets / local config
+.env
+*.pem
+*.key
+*.crt
+secrets/
+*.crt
+secrets/

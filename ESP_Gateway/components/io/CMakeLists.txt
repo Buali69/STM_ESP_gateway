@@ -1,0 +1,32 @@
+idf_component_register(
+    SRCS
+        "src/http_client.cpp"
+        "src/ota_client.cpp"
+        "src/ota_mgr.cpp"
+        "src/wifi_mgr.cpp"
+        "src/time_sync.cpp"
+        "src/led_service.cpp"
+        "src/sensors.cpp"
+        "src/crypto_helpers.cpp"
+        "src/stm32_uart.cpp"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        core
+        freertos
+        log
+        esp_timer
+        esp_system
+        esp_http_client
+        mbedtls
+        nvs_flash
+        app_update
+        cjson
+        driver
+        esp_netif
+        esp_event
+        esp_wifi
+        lwip
+        esp_driver_uart
+        esp_driver_gpio
+)

@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "src/core_logic.cpp"
+        "src/retry_policy.cpp"
+        "src/signing_utils.cpp"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        freertos
+        log
+        mbedtls
+)

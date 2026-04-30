@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/app.c
     Core/Src/uart_comm.c
     Core/Src/protocol.c
+    Core/Src/stm_ota.c
 )
 
 # Add include paths

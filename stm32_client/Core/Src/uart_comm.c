@@ -18,6 +18,13 @@ static volatile uint32_t ring_overflow_count = 0;
 static char line_buf[LINE_SIZE];
 static uint16_t line_index = 0;
 
+typedef enum {
+    UART_MODE_CONTROL = 0,
+    UART_MODE_DATA
+} uart_mode_t;
+
+static volatile uart_mode_t uart_mode = UART_MODE_CONTROL;
+
 static void uart_comm_start_rx(void)
 {
     HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
@@ -123,4 +130,19 @@ void uart_comm_process(void)
         ring_overflow_count = 0;
         uart_comm_log("RX ring overflow\r\n");
     }
+}
+
+void uart_comm_set_control_mode(void)
+{
+    uart_mode = UART_MODE_CONTROL;
+}
+
+void uart_comm_set_data_mode(void)
+{
+    uart_mode = UART_MODE_DATA;
+}
+
+int uart_comm_is_data_mode(void)
+{
+    return uart_mode == UART_MODE_DATA;
 }

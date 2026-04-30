@@ -12,4 +12,8 @@ void uart_comm_rx_callback(UART_HandleTypeDef *huart);
 void uart_comm_send_esp(const char *msg);
 void uart_comm_log(const char *msg);
 
+void uart_comm_set_control_mode(void);
+void uart_comm_set_data_mode(void);
+int uart_comm_is_data_mode(void);
+
 #endif

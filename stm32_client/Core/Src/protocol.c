@@ -155,6 +155,7 @@ void protocol_handle_line(const char *line)   // Empfangen
 
     if (strcmp(line, "OTA_DATA_BEGIN") == 0) {
         if (stm_ota_data_begin() == 0) {
+            uart_comm_set_data_mode();
             uart_comm_send_esp("OTA_DATA_READY\n");
             uart_comm_log("STM OTA: data begin\r\n");
         } else {
@@ -166,6 +167,7 @@ void protocol_handle_line(const char *line)   // Empfangen
     }
 
     if (strcmp(line, "OTA_END") == 0) {
+        uart_comm_set_control_mode();
         if (stm_ota_finish() == 0) {
             uart_comm_send_esp("OTA_OK\n");
             uart_comm_log("STM OTA: finished dummy OTA\r\n");
@@ -178,6 +180,7 @@ void protocol_handle_line(const char *line)   // Empfangen
     }
 
     if (strcmp(line, "OTA_ABORT") == 0) {
+        uart_comm_set_control_mode();
         stm_ota_abort();
         uart_comm_send_esp("OTA_ABORTED\n");
         uart_comm_log("STM OTA: aborted\r\n");

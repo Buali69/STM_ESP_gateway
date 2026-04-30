@@ -121,7 +121,9 @@ static void otaTask(void*) {
             job.url = msg.url;
             job.signatureBase64 = msg.signatureBase64;
 
+            otaMgrSetRunning(true);
             const bool ok = runOtaJob(job);
+            otaMgrSetRunning(false);
 
             otaRunning = false;
             postEvt(ok ? CoreEvtType::OTA_RUN_OK : CoreEvtType::OTA_RUN_FAIL);
@@ -150,7 +152,17 @@ static void ioTask(void*) {
     else {
         ESP_LOGI(TAG, "STM32 UART ready");
     }
-    bool stm32AliveChecked = false;
+    //bool stm32AliveChecked = false;
+
+    static bool testSent = false;
+
+    if (!testSent) {
+        testSent = true;
+
+        stm32UartWriteLine("OTA_BEGIN");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        stm32UartWriteLine("OTA_DONE");
+    }
 
     IoState st = IoState::WAIT_WIFI;
     bool printedIp = false;

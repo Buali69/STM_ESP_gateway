@@ -12,6 +12,8 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "io/ota_mgr.h"
+
 
 static const char* TAG = "HTTP_TLS";
 
@@ -240,6 +242,8 @@ void tlsProbe(void) {
          ok ? 1 : 0,
          code,
          (unsigned)body.size());
+
+    otaMgrSetServerStatus(ok);
 }
 
 bool httpsGetStream(const std::string& path,

@@ -17,6 +17,8 @@
 #endif
 
 namespace {
+OtaState g_ota_state = OtaState::Idle;
+
 static const char* TAG = "ota_mgr";
 static constexpr const char* NVS_NAMESPACE = "ota";
 static constexpr const char* NVS_KEY_CONFIRMED_FW = "confirmed_fw";
@@ -30,6 +32,13 @@ static uint32_t s_lastPollMs = 0;
 
 static constexpr uint32_t CONFIRM_RETRY_MS = 10000;
 static constexpr uint32_t OTA_POLL_MS      = 30000;
+
+static bool s_ota_running = false;
+
+static bool s_server_known = false;
+static bool s_server_ok = false;
+
+
 
 static std::string nvsReadString(const char* ns, const char* key) {
     nvs_handle_t handle;
@@ -125,6 +134,22 @@ static void tryConfirmRunningAppForRollback() {
 
 } // namespace
 
+bool otaMgrServerKnown()
+{
+    return s_server_known;
+}
+
+bool otaMgrServerOk()
+{
+    return s_server_ok;
+}
+
+void otaMgrSetServerStatus(bool ok)
+{
+    s_server_known = true;
+    s_server_ok = ok;
+}
+
 void otaMgrBegin(const std::string& fwVersion, const std::string& bootId) {
     
     const esp_partition_t* running = esp_ota_get_running_partition();
@@ -215,4 +240,41 @@ OtaMgrEvent otaMgrPoll(bool wifiOk, bool timeOk, bool forceTick, OtaJob* outJob)
     }
 
     return OtaMgrEvent::OtaJobReady;
+}
+
+bool otaMgrIsRunning()
+{
+    return s_ota_running;
+}
+
+void otaMgrSetRunning(bool running)
+{
+    s_ota_running = running;
+}
+
+void otaMgrSetState(OtaState state)
+{
+    g_ota_state = state;
+}
+
+OtaState otaMgrGetState()
+{
+    return g_ota_state;
+}
+
+const char* otaMgrStateText()
+{
+    switch (g_ota_state) {
+        case OtaState::Idle:           return "OTA_IDLE";
+        case OtaState::Checking:       return "OTA_CHECKING";
+        case OtaState::Downloading:    return "OTA_DOWNLOADING";
+        case OtaState::Verifying:      return "OTA_VERIFYING";
+        case OtaState::Stored:         return "OTA_STORED";
+        case OtaState::ReadyForStm:    return "OTA_READY_FOR_STM";
+        case OtaState::Transferring:   return "OTA_TRANSFERRING";
+        case OtaState::WaitStmConfirm: return "OTA_WAIT_STM_CONFIRM";
+        case OtaState::Done:           return "OTA_DONE";
+        case OtaState::Error:          return "OTA_ERROR";
+        default:                       return "OTA_ERROR";
+    }
 }

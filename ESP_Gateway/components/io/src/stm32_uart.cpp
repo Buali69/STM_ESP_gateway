@@ -7,6 +7,10 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 
+#include "io/wifi_mgr.h"
+#include "io/time_sync.h"
+#include "io/ota_mgr.h"
+
 namespace {
 static const char* TAG = "stm32_uart";
 
@@ -144,20 +148,43 @@ bool stm32Ping(uint32_t timeoutMs)
     return false;
 }
 
+static std::string buildStatusLine()
+{
+    std::string s = "STATUS:";
+
+    s += wifiIsConnected() ? "WIFI_OK" : "WIFI_DOWN";
+    s += ":";
+
+    s += timeIsSynced() ? "TIME_OK" : "TIME_BAD";
+    s += ":";
+
+    s += otaMgrStateText();   // <-- HIER geändert
+    s += ":";
+
+    if (!otaMgrServerKnown()) {
+        s += "SERVER_UNKNOWN";
+    } else {
+        s += otaMgrServerOk() ? "SERVER_OK" : "SERVER_ERR";
+    }
+
+    return s;
+}
+
 void stm32UartProcess()
 {
     std::string line;
 
     if (stm32UartReadLine(line, 20)) {
-        ESP_LOGI(TAG, "RX STM32 LINE: %s", line.c_str());
+        // ESP_LOGI(TAG, "RX STM32 LINE: %s", line.c_str());
 
         if (line == "PING") {
-            ESP_LOGI(TAG, "TX STM32: PONG");
+        //    ESP_LOGI(TAG, "TX STM32: PONG");
             stm32UartWriteLine("PONG");
         }
         else if (line == "STATUS?") {
-            ESP_LOGI(TAG, "TX STM32: STATUS:OK");
-            stm32UartWriteLine("STATUS:WIFI_OK:TIME_OK:OTA_IDLE");
+            const std::string status = buildStatusLine();
+         //   ESP_LOGI(TAG, "TX STM32: %s", status.c_str());
+            stm32UartWriteLine(status.c_str());
         }
         else {
             ESP_LOGW(TAG, "Unknown STM32 command: %s", line.c_str());
@@ -165,3 +192,4 @@ void stm32UartProcess()
         }
     }
 }
+

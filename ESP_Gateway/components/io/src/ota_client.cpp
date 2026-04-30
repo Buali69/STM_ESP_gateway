@@ -20,6 +20,7 @@ extern "C" {
 #include "core/signing_utils.h"
 #include "io/crypto_helpers.h"
 #include "io/http_client.h"
+#include "io/ota_mgr.h"
 
 namespace {
 static const char* TAG = "ota_client";
@@ -214,6 +215,8 @@ ConfirmFwResult confirmFwOncePerFw(const std::string& fwVersion,
     const bool ok = httpsPostJson("/api/ota/confirm", json, &code, &resp);
 
     ESP_LOGI(TAG, "confirm try ok=%d http=%d body=%s", ok ? 1 : 0, code, resp.c_str());
+
+    otaMgrSetServerStatus(ok);    
 
     if (!ok) {
         return ConfirmFwResult::RetryableError;

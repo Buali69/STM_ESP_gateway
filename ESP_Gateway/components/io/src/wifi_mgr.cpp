@@ -14,6 +14,7 @@
 #include "lwip/ip4_addr.h"
 
 static const char* TAG = "WIFI_MGR";
+static bool s_ota_running = false;
 
 static EventGroupHandle_t s_wifiEventGroup = nullptr;
 static bool s_wifiConnected = false;
@@ -49,6 +50,7 @@ static void wifiEventHandler(void*,
         }
     }
 }
+
 
 void wifiInit() {
     static bool initialized = false;

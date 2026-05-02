@@ -9,6 +9,7 @@ idf_component_register(
         "src/sensors.cpp"
         "src/crypto_helpers.cpp"
         "src/stm32_uart.cpp"
+        "src/stm32_fw_transfer.cpp"
     INCLUDE_DIRS
         "include"
     REQUIRES

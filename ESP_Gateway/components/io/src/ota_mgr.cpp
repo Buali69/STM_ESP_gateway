@@ -244,7 +244,9 @@ OtaMgrEvent otaMgrPoll(bool wifiOk, bool timeOk, bool forceTick, OtaJob* outJob)
 
 bool otaMgrIsRunning()
 {
-    return s_ota_running;
+    return g_ota_state != OtaState::Idle &&
+           g_ota_state != OtaState::Done &&
+           g_ota_state != OtaState::Error;
 }
 
 void otaMgrSetRunning(bool running)

@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <string>
+#include <cstddef>
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
@@ -10,8 +11,11 @@
 #include "io/wifi_mgr.h"
 #include "io/time_sync.h"
 #include "io/ota_mgr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace {
+Stm32UartMode s_mode = Stm32UartMode::Control;
 static const char* TAG = "stm32_uart";
 
 // UART Nummer frei wählen.
@@ -177,19 +181,64 @@ void stm32UartProcess()
     if (stm32UartReadLine(line, 20)) {
         // ESP_LOGI(TAG, "RX STM32 LINE: %s", line.c_str());
 
+        if (line.empty()) {
+            return;
+        }
+
+        for (char c : line) {
+            if (c < 32 || c > 126) {
+                ESP_LOGW(TAG, "Ignoring non-printable STM32 line");
+                return;
+            }
+        }
+
         if (line == "PING") {
         //    ESP_LOGI(TAG, "TX STM32: PONG");
             stm32UartWriteLine("PONG");
+            return;
         }
         else if (line == "STATUS?") {
             const std::string status = buildStatusLine();
          //   ESP_LOGI(TAG, "TX STM32: %s", status.c_str());
             stm32UartWriteLine(status.c_str());
+            return;
         }
-        else {
-            ESP_LOGW(TAG, "Unknown STM32 command: %s", line.c_str());
-            stm32UartWriteLine("ERROR:UNKNOWN_CMD");
+        if (stm32UartIsTransferMode()) {
+            ESP_LOGW(TAG, "Ignoring STM32 line during transfer: %s", line.c_str());
+            return;
         }
+
+        ESP_LOGW(TAG, "Unknown STM32 command: %s", line.c_str());
+        return;
     }
 }
 
+bool stm32UartWriteBytes(const uint8_t* data, size_t len)
+{
+    if (!s_initialized || data == nullptr || len == 0) {
+        return false;
+    }
+
+    int written = uart_write_bytes(
+        UART_PORT,
+        reinterpret_cast<const char*>(data),
+        len
+    );
+
+    return written == static_cast<int>(len);
+}
+
+void stm32UartSetMode(Stm32UartMode mode)
+{
+    s_mode = mode;
+}
+
+Stm32UartMode stm32UartGetMode()
+{
+    return s_mode;
+}
+
+bool stm32UartIsTransferMode()
+{
+    return s_mode == Stm32UartMode::Transfer;
+}

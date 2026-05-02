@@ -28,6 +28,7 @@
 #include "io/http_client.h"
 #include "io/sensors.h"
 #include "io/stm32_uart.h"
+#include "io/stm32_fw_transfer.h"
 
 namespace {
 static const char* TAG = "app_tasks";
@@ -132,6 +133,44 @@ static void otaTask(void*) {
 }
 
 
+static bool runStmOtaTest()
+{
+    bool ok = true;
+
+    if (!stm32FwTransferBegin(123456, 0x89ABCDEF)) {
+        ESP_LOGE(TAG, "OTA_PREPARE failed");
+        ok = false;
+    }
+
+    if (ok && !stm32FwTransferDataBegin()) {
+        ESP_LOGE(TAG, "OTA_DATA_BEGIN failed");
+        ok = false;
+    }
+
+    if (ok) {
+        vTaskDelay(pdMS_TO_TICKS(50));   // ← HIER rein
+    }
+
+    if (ok && !stm32FwTransferSendDummyChunks(3)) {
+        ESP_LOGE(TAG, "Dummy chunks failed");
+        ok = false;
+    }
+
+    if (ok && !stm32FwTransferDataEnd(3)) {
+        ESP_LOGE(TAG, "DATA_END failed");
+        ok = false;
+    }
+
+    if (ok && !stm32FwTransferEnd()) {
+        ESP_LOGE(TAG, "OTA_END failed");
+        ok = false;
+    }
+
+    stm32UartSetMode(Stm32UartMode::Control);
+    ESP_LOGI(TAG, "=== STM OTA TEST DONE ok=%d ===", ok);
+    return ok;
+}
+
 // ---------------- IO TASK ----------------
 static void ioTask(void*) {
     ledInit(LED_PIN);
@@ -154,14 +193,12 @@ static void ioTask(void*) {
     }
     //bool stm32AliveChecked = false;
 
-    static bool testSent = false;
+     static bool testSent = false;
 
     if (!testSent) {
-        testSent = true;
-
-        stm32UartWriteLine("OTA_BEGIN");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        stm32UartWriteLine("OTA_DONE");
+    testSent = true;
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    runStmOtaTest();
     }
 
     IoState st = IoState::WAIT_WIFI;

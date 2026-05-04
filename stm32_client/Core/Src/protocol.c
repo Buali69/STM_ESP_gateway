@@ -199,15 +199,21 @@ void protocol_process(void)     //  Senden
     if ((now - last_ping_ms) >= PROTOCOL_PING_INTERVAL_MS)
     {
         last_ping_ms = now;
-        uart_comm_send_esp("PING\n");
+        if (!uart_comm_is_data_mode()) {
+            uart_comm_send_esp("PING\n");
+        
         uart_comm_log("TX ESP: PING\r\n");
+        }
     }
 
     if ((now - last_status_ms) >= PROTOCOL_STATUS_INTERVAL_MS)
     {
         last_status_ms = now;
-        uart_comm_send_esp("STATUS?\n");
-        uart_comm_log("TX ESP: STATUS?\r\n");
+       if (!uart_comm_is_data_mode()) {
+            uart_comm_send_esp("STATUS?\n");
+            uart_comm_log("TX ESP: STATUS?\r\n");
+        }
+        
     }
 
     if (esp_online && (now - last_pong_ms) > PROTOCOL_HEARTBEAT_TIMEOUT_MS)

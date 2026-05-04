@@ -4,6 +4,7 @@
 #include "main.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 void uart_comm_init(void);
 void uart_comm_process(void);

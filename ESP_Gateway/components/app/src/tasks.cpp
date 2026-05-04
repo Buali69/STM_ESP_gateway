@@ -1,6 +1,7 @@
 #include "app/tasks.h"
 
 #include <cinttypes>
+#include <inttypes.h>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
@@ -14,6 +15,8 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+
+#include "app/stm_fw_image_raw.h"
 
 #include "core/messages.h"
 #include "core/core_logic.h"
@@ -31,6 +34,9 @@
 #include "io/stm32_fw_transfer.h"
 
 namespace {
+const uint8_t* fwData = stm_fw_data;
+const uint32_t fwSize = stm_fw_size;
+
 static const char* TAG = "app_tasks";
 
 static constexpr int LED_PIN = 2;
@@ -137,7 +143,14 @@ static bool runStmOtaTest()
 {
     bool ok = true;
 
-    if (!stm32FwTransferBegin(123456, 0x89ABCDEF)) {
+    const uint8_t* fwData = stm_fw_data;
+    const uint32_t fwSize = stm_fw_size;
+
+    ESP_LOGI(TAG, "STM FW transfer test size=%" PRIu32, fwSize);
+
+    const uint32_t fwCrc = stm32FwTransferCalcCrc32(fwData, fwSize);
+
+    if (!stm32FwTransferBegin(fwSize, fwCrc)) {
         ESP_LOGE(TAG, "OTA_PREPARE failed");
         ok = false;
     }
@@ -148,15 +161,17 @@ static bool runStmOtaTest()
     }
 
     if (ok) {
-        vTaskDelay(pdMS_TO_TICKS(50));   // ← HIER rein
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    if (ok && !stm32FwTransferSendDummyChunks(3)) {
-        ESP_LOGE(TAG, "Dummy chunks failed");
+    if (ok && !stm32FwTransferSendBuffer(fwData, fwSize)) {
+        ESP_LOGE(TAG, "Firmware transfer failed");
         ok = false;
     }
 
-    if (ok && !stm32FwTransferDataEnd(3)) {
+    const uint32_t dataEndSeq = (fwSize + 255u) / 256u;
+
+    if (ok && !stm32FwTransferDataEnd(dataEndSeq)) {
         ESP_LOGE(TAG, "DATA_END failed");
         ok = false;
     }
@@ -167,7 +182,7 @@ static bool runStmOtaTest()
     }
 
     stm32UartSetMode(Stm32UartMode::Control);
-    ESP_LOGI(TAG, "=== STM OTA TEST DONE ok=%d ===", ok);
+    ESP_LOGI(TAG, "=== STM FW TRANSFER TEST DONE ok=%d ===", ok);
     return ok;
 }
 

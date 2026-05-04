@@ -24,3 +24,10 @@ int stm_ota_abort(void);
 stm_ota_state_t stm_ota_get_state(void);
 uint32_t stm_ota_get_expected_size(void);
 uint32_t stm_ota_get_expected_crc32(void);
+
+int stm_ota_add_received(uint32_t len);
+uint32_t stm_ota_get_received_size(void);
+
+void stm_ota_crc_reset(void);
+void stm_ota_crc_update(const uint8_t *data, uint32_t len);
+uint32_t stm_ota_get_final_crc32(void);

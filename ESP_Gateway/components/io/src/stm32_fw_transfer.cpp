@@ -3,11 +3,13 @@
 #include <string>
 #include <array>
 #include <cstring>
+#include <vector>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
+#include "esp_crc.h"
 
 #include "io/stm32_fw_transfer.h"
 #include "io/stm32_uart.h"
@@ -29,6 +31,14 @@ static bool waitForExpectedLine(const char* expected, uint32_t timeoutMs)
 
         if (resp == expected) {
             return true;
+        }
+
+        // NEU: NACK niemals ignorieren
+        if (resp.rfind("NACK:", 0) == 0) {
+            ESP_LOGE(TAG, "STM rejected transfer while waiting for %s: %s",
+                     expected,
+                     resp.c_str());
+            return false;
         }
 
         ESP_LOGW(TAG, "Ignoring unexpected line while waiting for %s: %s",
@@ -223,4 +233,99 @@ bool stm32FwTransferDataEnd(uint32_t seq)
 
     ESP_LOGI(TAG, "STM DATA phase ended");
     return true;
+}
+
+static uint32_t fwCrc32(const uint8_t* data, uint32_t len)
+{
+    uint32_t crc = UINT32_MAX;
+
+    while (len--) {
+        crc ^= static_cast<uint32_t>(*data++);
+
+        for (uint32_t i = 0; i < 8; ++i) {
+            if (crc & 1u) {
+                crc = (crc >> 1) ^ 0xEDB88320u;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+
+    return crc ^ UINT32_MAX;
+}
+
+bool stm32FwTransferSendChunk(uint32_t seq, const uint8_t* data, uint16_t len)
+{
+    constexpr uint32_t MAGIC = 0x53544D31; // "STM1"
+    constexpr uint16_t RESERVED = 0;
+
+    if (data == nullptr || len == 0) {
+        return false;
+    }
+
+    uint32_t crc = fwCrc32(data, len);
+
+    std::vector<uint8_t> frame(16 + len);
+
+    putU32Le(&frame[0], MAGIC);
+    putU32Le(&frame[4], seq);
+    putU16Le(&frame[8], len);
+    putU16Le(&frame[10], RESERVED);
+    putU32Le(&frame[12], crc);
+
+    std::memcpy(&frame[16], data, len);
+
+    const size_t frameLen = frame.size();
+
+    ESP_LOGI(TAG,
+             "TX frame seq=%" PRIu32 " payloadLen=%u frameLen=%u crc=%08" PRIx32,
+             seq,
+             len,
+             (unsigned int)frameLen,
+             crc);
+
+    if (!stm32UartWriteBytes(frame.data(), frameLen)) {
+        ESP_LOGE(TAG, "Failed to send chunk seq=%" PRIu32 " frameLen=%u",
+                 seq,
+                 (unsigned int)frameLen);
+        return false;
+    }
+
+    char expectedAck[32];
+    std::snprintf(expectedAck, sizeof(expectedAck), "ACK:%" PRIu32, seq);
+
+    return waitForExpectedLine(expectedAck, 2000);
+}
+
+bool stm32FwTransferSendBuffer(const uint8_t* data, uint32_t size)
+{
+    constexpr uint16_t CHUNK_SIZE = 256;
+
+    if (data == nullptr || size == 0) {
+        return false;
+    }
+
+    uint32_t offset = 0;
+    uint32_t seq = 0;
+
+    while (offset < size) {
+        uint32_t remaining = size - offset;
+        uint16_t len = remaining > CHUNK_SIZE ? CHUNK_SIZE : (uint16_t)remaining;
+
+        if (!stm32FwTransferSendChunk(seq, data + offset, len)) {
+            ESP_LOGE(TAG, "Transfer failed at seq=%" PRIu32, seq);
+            return false;
+        }
+
+        offset += len;
+        seq++;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    return true;
+}
+
+uint32_t stm32FwTransferCalcCrc32(const uint8_t* data, uint32_t len)
+{
+    return fwCrc32(data, len);
 }

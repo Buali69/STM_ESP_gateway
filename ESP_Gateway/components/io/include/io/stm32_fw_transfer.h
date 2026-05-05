@@ -14,3 +14,5 @@ bool stm32FwTransferEnd();
 
 bool stm32FwTransferSendBuffer(const uint8_t* data, uint32_t size);
 uint32_t stm32FwTransferCalcCrc32(const uint8_t* data, uint32_t len);
+
+bool stm32FwTransferAbort();

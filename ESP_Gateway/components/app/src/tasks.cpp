@@ -34,6 +34,8 @@
 #include "io/stm32_fw_transfer.h"
 
 namespace {
+static constexpr bool ENABLE_STM_FW_TRANSFER_TEST = true;
+
 const uint8_t* fwData = stm_fw_data;
 const uint32_t fwSize = stm_fw_size;
 
@@ -149,7 +151,7 @@ static bool runStmOtaTest()
     ESP_LOGI(TAG, "STM FW transfer test size=%" PRIu32, fwSize);
 
     const uint32_t fwCrc = stm32FwTransferCalcCrc32(fwData, fwSize);
-
+    
     if (!stm32FwTransferBegin(fwSize, fwCrc)) {
         ESP_LOGE(TAG, "OTA_PREPARE failed");
         ok = false;
@@ -181,6 +183,10 @@ static bool runStmOtaTest()
         ok = false;
     }
 
+    if (!ok) {
+        stm32FwTransferAbort();
+    }
+
     stm32UartSetMode(Stm32UartMode::Control);
     ESP_LOGI(TAG, "=== STM FW TRANSFER TEST DONE ok=%d ===", ok);
     return ok;
@@ -206,27 +212,20 @@ static void ioTask(void*) {
     else {
         ESP_LOGI(TAG, "STM32 UART ready");
     }
-    //bool stm32AliveChecked = false;
+    
+    static bool testSent = false;
 
-     static bool testSent = false;
-
-    if (!testSent) {
-    testSent = true;
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    runStmOtaTest();
+    if (ENABLE_STM_FW_TRANSFER_TEST && !testSent) {
+        testSent = true;
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        runStmOtaTest();
     }
 
     IoState st = IoState::WAIT_WIFI;
     bool printedIp = false;
     bool lastWifiOk = false;
     uint32_t lastStackLogMs = 0;
-
-    /*
-    if (!stm32AliveChecked) {
-    stm32AliveChecked = true;
-    const bool ok = stm32Ping(1000);
-    ESP_LOGI(TAG, "STM32 ping result: %s", ok ? "OK" : "FAIL");
-    } */
+    
 
     for (;;) {
         ledTick();

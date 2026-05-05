@@ -33,11 +33,21 @@ static bool waitForExpectedLine(const char* expected, uint32_t timeoutMs)
             return true;
         }
 
-        // NEU: NACK niemals ignorieren
+        // NACK niemals ignorieren
         if (resp.rfind("NACK:", 0) == 0) {
             ESP_LOGE(TAG, "STM rejected transfer while waiting for %s: %s",
                      expected,
                      resp.c_str());
+            return false;
+        }
+
+        if (resp.rfind("DATA_END_FAIL:", 0) == 0) {
+            ESP_LOGE(TAG, "STM DATA_END failed: %s", resp.c_str());
+            return false;
+        }
+
+        if (resp.rfind("OTA_FAIL:", 0) == 0) {
+            ESP_LOGE(TAG, "STM OTA failed: %s", resp.c_str());
             return false;
         }
 
@@ -328,4 +338,17 @@ bool stm32FwTransferSendBuffer(const uint8_t* data, uint32_t size)
 uint32_t stm32FwTransferCalcCrc32(const uint8_t* data, uint32_t len)
 {
     return fwCrc32(data, len);
+}
+
+bool stm32FwTransferAbort()
+{
+    stm32UartSetMode(Stm32UartMode::Control);
+
+    if (!stm32UartWriteLine("OTA_ABORT")) {
+        ESP_LOGE(TAG, "Failed to send OTA_ABORT");
+        return false;
+    }
+
+    ESP_LOGW(TAG, "Sent OTA_ABORT");
+    return true;
 }

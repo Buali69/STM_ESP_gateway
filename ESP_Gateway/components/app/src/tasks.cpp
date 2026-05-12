@@ -7,6 +7,7 @@
 #include <ctime>
 #include <string>
 #include <cstring>
+#include <vector>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -32,8 +33,21 @@
 #include "io/sensors.h"
 #include "io/stm32_uart.h"
 #include "io/stm32_fw_transfer.h"
+#include "stm_fw_storage.h"
 
 namespace {
+static const uint8_t* lastGoodFw = nullptr;
+static size_t lastGoodFwSize = 0;
+
+enum class StmFwState {
+    Empty,
+    Candidate,
+    KnownGood,
+    Failed
+};
+
+static StmFwState stmFwState = StmFwState::Empty;
+
 static constexpr bool ENABLE_STM_FW_TRANSFER_TEST = true;
 
 const uint8_t* fwData = stm_fw_data;
@@ -141,17 +155,15 @@ static void otaTask(void*) {
 }
 
 
-static bool runStmOtaTest()
+static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize)
 {
     bool ok = true;
 
-    const uint8_t* fwData = stm_fw_data;
-    const uint32_t fwSize = stm_fw_size;
-
-    ESP_LOGI(TAG, "STM FW transfer test size=%" PRIu32, fwSize);
-
     const uint32_t fwCrc = stm32FwTransferCalcCrc32(fwData, fwSize);
-    
+
+    stmFwState = StmFwState::Candidate;
+    ESP_LOGI(TAG, "STM FW state -> Candidate");
+
     if (!stm32FwTransferBegin(fwSize, fwCrc)) {
         ESP_LOGE(TAG, "OTA_PREPARE failed");
         ok = false;
@@ -187,6 +199,68 @@ static bool runStmOtaTest()
         stm32FwTransferAbort();
     }
 
+    return ok;
+}
+
+static bool runStmOtaTest()
+{
+    bool ok = true;
+    
+    const uint8_t* fwData = stm_fw_data;
+    const uint32_t fwSize = stm_fw_size;
+
+    ESP_LOGI(TAG, "STM FW transfer test size=%" PRIu32, fwSize);
+    
+    if (!sendStmFirmware(fwData, fwSize)) {
+        return false;
+    }
+
+    if (ok) {
+       ESP_LOGI(TAG, "WAIT_BOOT_CONFIRM");
+
+       stm32UartClearBootConfirmed();
+
+       TickType_t start = xTaskGetTickCount();
+       TickType_t timeout = pdMS_TO_TICKS(10000);
+
+        while ((xTaskGetTickCount() - start) < timeout) {
+            stm32UartProcess();
+
+             if (stm32UartIsBootConfirmed()) {
+                  break;
+             }
+
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+
+        if (stm32UartIsBootConfirmed()) {
+            ESP_LOGI(TAG, "STM update confirmed -> known good");
+
+            stmFwState = StmFwState::KnownGood;
+
+            lastGoodFw = fwData;
+            lastGoodFwSize = fwSize;
+
+            stmFwStorageWriteKnownGood(fwData, fwSize);
+            ESP_LOGI(TAG, "Stored FW as known-good");
+        } else {
+            ESP_LOGW(TAG, "STM boot confirm timeout -> rollback");
+
+            stmFwState = StmFwState::Failed;
+
+            std::vector<uint8_t> rollbackFw;
+
+        if (stmFwStorageReadKnownGood(rollbackFw)) {
+            ESP_LOGI(TAG, "Rollback: sending known-good from flash");
+            sendStmFirmware(rollbackFw.data(), rollbackFw.size());
+        } else {
+            ESP_LOGW(TAG, "No known-good firmware available");
+        }
+
+            ok = false;
+        }
+    }
+
     stm32UartSetMode(Stm32UartMode::Control);
     ESP_LOGI(TAG, "=== STM FW TRANSFER TEST DONE ok=%d ===", ok);
     return ok;
@@ -215,10 +289,29 @@ static void ioTask(void*) {
     
     static bool testSent = false;
 
-    if (ENABLE_STM_FW_TRANSFER_TEST && !testSent) {
+    if (!testSent) {
         testSent = true;
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        runStmOtaTest();
+        stm32ClearOtaReady();
+
+        ESP_LOGI(TAG, "Waiting for STM OTA_READY...");
+
+        const int64_t start = esp_timer_get_time();
+
+        while (!stm32IsOtaReady() &&
+            (esp_timer_get_time() - start) < 5000000LL) {
+
+            stm32UartProcess();
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+
+        ESP_LOGI(TAG, "Wait finished, otaReady=%d", stm32IsOtaReady());
+
+        if (!stm32IsOtaReady()) {
+            ESP_LOGE(TAG, "STM bootloader OTA_READY timeout");
+        } else {
+            ESP_LOGI(TAG, "STM bootloader ready, starting STM OTA");
+            runStmOtaTest();
+        }
     }
 
     IoState st = IoState::WAIT_WIFI;
@@ -520,6 +613,12 @@ static void coreTask(void*) {
 } // namespace
 
 void appTasksStart() {
+    ESP_LOGI(TAG, "appTasksStart");
+
+    if (!stmFwStorageInit()) {
+        ESP_LOGW(TAG, "STM FW storage init failed");
+    }
+
     ioQ  = xQueueCreate(8, sizeof(IoMsg));
     evtQ = xQueueCreate(16, sizeof(CoreEvt));
     otaQ = xQueueCreate(2, sizeof(OtaTaskMsg));

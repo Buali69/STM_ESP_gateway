@@ -29,7 +29,7 @@ static bool waitForExpectedLine(const char* expected, uint32_t timeoutMs)
 
         ESP_LOGI(TAG, "RX: %s", resp.c_str());
 
-        if (resp == expected) {
+        if (resp.find(expected) != std::string::npos) {
             return true;
         }
 
@@ -64,7 +64,7 @@ bool stm32FwTransferBegin(uint32_t size, uint32_t crc32)
 {
     char line[64];
 
-    stm32UartSetMode(Stm32UartMode::Transfer);
+    stm32UartSetMode(Stm32UartMode::Control);
 
     std::snprintf(
         line,
@@ -76,16 +76,16 @@ bool stm32FwTransferBegin(uint32_t size, uint32_t crc32)
 
     if (!stm32UartWriteLine(line)) {
         ESP_LOGE(TAG, "Failed to send OTA_PREPARE");
-        stm32UartSetMode(Stm32UartMode::Control);
         return false;
     }
 
     ESP_LOGI(TAG, "TX: %s", line);
 
-    if (!waitForExpectedLine("OTA_READY", 2000)) {
-        stm32UartSetMode(Stm32UartMode::Control);
+    if (!waitForExpectedLine("OTA_READY", 5000)) {
         return false;
     }
+
+    stm32UartSetMode(Stm32UartMode::Transfer);
 
     ESP_LOGI(TAG, "STM ready for firmware transfer");
     return true;

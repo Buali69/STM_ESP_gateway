@@ -15,6 +15,9 @@
 #include "freertos/task.h"
 
 namespace {
+static bool stmBootConfirmed = false;
+static bool stmOtaReady = false;
+
 Stm32UartMode s_mode = Stm32UartMode::Control;
 static const char* TAG = "stm32_uart";
 
@@ -180,6 +183,7 @@ void stm32UartProcess()
 
     if (stm32UartReadLine(line, 20)) {
         // ESP_LOGI(TAG, "RX STM32 LINE: %s", line.c_str());
+        ESP_LOGI(TAG, "STM LINE len=%u: '%s'", line.length(), line.c_str());
 
         if (line.empty()) {
             return;
@@ -190,6 +194,18 @@ void stm32UartProcess()
                 ESP_LOGW(TAG, "Ignoring non-printable STM32 line");
                 return;
             }
+        }
+
+        if (line == "BOOT_OK") {
+            ESP_LOGI(TAG, "STM BOOT_OK received");
+            stmBootConfirmed = true;
+            return;
+        }
+
+        if (line.find("OTA_READY") != std::string::npos) {
+            ESP_LOGI(TAG, "MATCH OTA_READY -> set flag");
+            stmOtaReady = true;
+            return;
         }
 
         if (line == "PING") {
@@ -241,4 +257,24 @@ Stm32UartMode stm32UartGetMode()
 bool stm32UartIsTransferMode()
 {
     return s_mode == Stm32UartMode::Transfer;
+}
+
+void stm32UartClearBootConfirmed(void)
+{
+    stmBootConfirmed = false;
+}
+
+bool stm32UartIsBootConfirmed(void)
+{
+    return stmBootConfirmed;
+}
+
+void stm32ClearOtaReady()
+{
+    stmOtaReady = false;
+}
+
+bool stm32IsOtaReady()
+{
+    return stmOtaReady;
 }

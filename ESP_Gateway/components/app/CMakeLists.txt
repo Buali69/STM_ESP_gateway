@@ -5,6 +5,9 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
 
+    PRIV_REQUIRES
+        stm_fw_storage
+    
     REQUIRES
         freertos
         esp_timer

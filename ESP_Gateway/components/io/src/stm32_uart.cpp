@@ -85,7 +85,7 @@ bool stm32UartWriteLine(const char* line)
         return false;
     }
 
-    const std::string msg = std::string(line) + "\n";
+    const std::string msg = std::string(line) + "\r\n";
     const int written = uart_write_bytes(UART_PORT, msg.data(), msg.size());
     if (written < 0) {
         ESP_LOGE(TAG, "uart_write_bytes failed");

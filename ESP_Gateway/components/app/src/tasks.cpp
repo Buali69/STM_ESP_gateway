@@ -17,7 +17,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 
-#include "app/stm_fw_image_raw.h"
+#include "io/stm_fw_image_raw.h"
 
 #include "core/messages.h"
 #include "core/core_logic.h"
@@ -33,9 +33,13 @@
 #include "io/sensors.h"
 #include "io/stm32_uart.h"
 #include "io/stm32_fw_transfer.h"
-#include "stm_fw_storage.h"
+#include "io/stm_fw_storage.h"
+#include "io/stm_fw_provider.h"
+#include "io/stm32_reset.h"
 
 namespace {
+static volatile bool g_stmOtaDevRequested = true;
+
 static const uint8_t* lastGoodFw = nullptr;
 static size_t lastGoodFwSize = 0;
 
@@ -48,10 +52,11 @@ enum class StmFwState {
 
 static StmFwState stmFwState = StmFwState::Empty;
 
+/*
 static constexpr bool ENABLE_STM_FW_TRANSFER_TEST = true;
 
 const uint8_t* fwData = stm_fw_data;
-const uint32_t fwSize = stm_fw_size;
+const uint32_t fwSize = stm_fw_size;   */
 
 static const char* TAG = "app_tasks";
 
@@ -154,6 +159,10 @@ static void otaTask(void*) {
     }
 }
 
+void requestStmOtaDevTest()
+{
+    g_stmOtaDevRequested = true;
+}
 
 static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize)
 {
@@ -202,15 +211,49 @@ static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize)
     return ok;
 }
 
-static bool runStmOtaTest()
+static bool runStmOtaUpdate(const uint8_t* fwData, uint32_t fwSize)
 {
     bool ok = true;
     
-    const uint8_t* fwData = stm_fw_data;
-    const uint32_t fwSize = stm_fw_size;
+   // const uint8_t* fwData = stm_fw_data;
+   // const uint32_t fwSize = stm_fw_size;
+
+    if (!fwData || fwSize == 0) {
+        ESP_LOGE(TAG, "Invalid STM firmware image");
+        return false;
+    }
 
     ESP_LOGI(TAG, "STM FW transfer test size=%" PRIu32, fwSize);
     
+    stm32UartSetMode(Stm32UartMode::Control);
+    stm32ClearOtaReady();
+    stm32UartClearBootConfirmed();
+
+    stmReset();
+
+    vTaskDelay(pdMS_TO_TICKS(300));
+
+    stm32ClearOtaReady();
+
+    ESP_LOGI(TAG, "Waiting for STM OTA_READY...");
+
+    const int64_t startUs = esp_timer_get_time();
+    const int64_t timeoutUs = 5000000LL;
+
+    while (!stm32IsOtaReady() &&
+       (esp_timer_get_time() - startUs) < timeoutUs) {
+
+    stm32UartProcess();
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+if (!stm32IsOtaReady()) {
+        ESP_LOGE(TAG, "STM bootloader OTA_READY timeout");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "STM bootloader ready, starting STM OTA");
+
     if (!sendStmFirmware(fwData, fwSize)) {
         return false;
     }
@@ -233,37 +276,111 @@ static bool runStmOtaTest()
             vTaskDelay(pdMS_TO_TICKS(50));
         }
 
-        if (stm32UartIsBootConfirmed()) {
-            ESP_LOGI(TAG, "STM update confirmed -> known good");
+     if (stm32UartIsBootConfirmed()) {
+        ESP_LOGI(TAG, "STM update confirmed -> known good");
 
-            stmFwState = StmFwState::KnownGood;
+        stmFwState = StmFwState::KnownGood;
 
-            lastGoodFw = fwData;
-            lastGoodFwSize = fwSize;
+        lastGoodFw = fwData;
+        lastGoodFwSize = fwSize;
 
-            stmFwStorageWriteKnownGood(fwData, fwSize);
-            ESP_LOGI(TAG, "Stored FW as known-good");
+        if (stmFwStorageWriteKnownGood(fwData, fwSize)) {
+            ESP_LOGI(TAG, "Stored FW as persistent known-good");
         } else {
-            ESP_LOGW(TAG, "STM boot confirm timeout -> rollback");
-
-            stmFwState = StmFwState::Failed;
-
-            std::vector<uint8_t> rollbackFw;
-
-        if (stmFwStorageReadKnownGood(rollbackFw)) {
-            ESP_LOGI(TAG, "Rollback: sending known-good from flash");
-            sendStmFirmware(rollbackFw.data(), rollbackFw.size());
-        } else {
-            ESP_LOGW(TAG, "No known-good firmware available");
+            ESP_LOGE(TAG, "Failed to store persistent known-good");
         }
 
-            ok = false;
+    } else {
+        ESP_LOGW(TAG, "STM boot confirm timeout -> rollback");
+
+        stmFwState = StmFwState::Failed;
+
+        std::vector<uint8_t> rollbackFw;
+
+    if (stmFwStorageReadKnownGood(rollbackFw)) {
+
+        ESP_LOGW(TAG, "ROLLBACK START: sending persistent known-good");
+
+        stm32UartSetMode(Stm32UartMode::Control);
+
+        stm32ClearOtaReady();
+        stm32UartClearBootConfirmed();
+
+        stmReset();
+
+        const int64_t rbStartUs = esp_timer_get_time();
+        const int64_t rbTimeoutUs = 5000000LL;
+
+        while (!stm32IsOtaReady() &&
+            (esp_timer_get_time() - rbStartUs) < rbTimeoutUs) {
+
+            stm32UartProcess();
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
+
+        if (!stm32IsOtaReady()) {
+
+            ESP_LOGE(TAG, "ROLLBACK FAILED: STM OTA_READY timeout");
+
+        } else {
+
+            if (sendStmFirmware(rollbackFw.data(), rollbackFw.size())) {
+
+                ESP_LOGI(TAG, "ROLLBACK transfer finished");
+
+                stm32UartClearBootConfirmed();
+
+                TickType_t rbBootStart = xTaskGetTickCount();
+                TickType_t rbBootTimeout = pdMS_TO_TICKS(10000);
+
+                while ((xTaskGetTickCount() - rbBootStart) < rbBootTimeout) {
+
+                    stm32UartProcess();
+
+                    if (stm32UartIsBootConfirmed()) {
+                        break;
+                    }
+
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                }
+
+                if (stm32UartIsBootConfirmed()) {
+                    ESP_LOGW(TAG, "ROLLBACK SUCCESS: BOOT_OK received");
+                } else {
+                    ESP_LOGE(TAG, "ROLLBACK FAILED: no BOOT_OK");
+                }
+
+            } else {
+
+                ESP_LOGE(TAG, "ROLLBACK FAILED: transfer failed");
+            }
+        }
+
+    } else {
+
+        ESP_LOGW(TAG, "No persistent known-good firmware available");
+    }
+
+   ok = false;
+    }
     }
 
     stm32UartSetMode(Stm32UartMode::Control);
     ESP_LOGI(TAG, "=== STM FW TRANSFER TEST DONE ok=%d ===", ok);
     return ok;
+}
+
+static bool runEmbeddedStmOtaDevTest()
+{
+    StmFirmwareImage img{};
+
+    if (!stmFwGetEmbeddedTest(img)) {
+        ESP_LOGE(TAG, "No embedded STM test firmware");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "STM embedded OTA dev test size=%" PRIu32, img.size);
+    return runStmOtaUpdate(img.data, img.size);
 }
 
 // ---------------- IO TASK ----------------
@@ -287,6 +404,9 @@ static void ioTask(void*) {
         ESP_LOGI(TAG, "STM32 UART ready");
     }
     
+ //   g_stmOtaDevRequested = true;
+
+    /*
     static bool testSent = false;
 
     if (!testSent) {
@@ -312,7 +432,7 @@ static void ioTask(void*) {
             ESP_LOGI(TAG, "STM bootloader ready, starting STM OTA");
             runStmOtaTest();
         }
-    }
+    }   */
 
     IoState st = IoState::WAIT_WIFI;
     bool printedIp = false;
@@ -324,6 +444,13 @@ static void ioTask(void*) {
         ledTick();
 
         stm32UartProcess();
+
+        if (g_stmOtaDevRequested) {
+            g_stmOtaDevRequested = false;
+
+            ESP_LOGI(TAG, "Manual STM OTA dev test requested");
+            runEmbeddedStmOtaDevTest();
+        }
 
         const uint32_t now = nowMs();
 
@@ -617,6 +744,10 @@ void appTasksStart() {
 
     if (!stmFwStorageInit()) {
         ESP_LOGW(TAG, "STM FW storage init failed");
+    }
+
+    if (!stm32ResetInit()) {
+        ESP_LOGE(TAG, "STM reset init failed");
     }
 
     ioQ  = xQueueCreate(8, sizeof(IoMsg));

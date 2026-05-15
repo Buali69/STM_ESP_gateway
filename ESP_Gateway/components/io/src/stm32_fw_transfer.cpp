@@ -81,13 +81,14 @@ bool stm32FwTransferBegin(uint32_t size, uint32_t crc32)
 
     ESP_LOGI(TAG, "TX: %s", line);
 
-    if (!waitForExpectedLine("OTA_READY", 5000)) {
+    if (!waitForExpectedLine("OTA_PREPARED", 5000)) {
+        ESP_LOGE(TAG, "Timeout waiting for OTA_PREPARED");
         return false;
     }
 
     stm32UartSetMode(Stm32UartMode::Transfer);
 
-    ESP_LOGI(TAG, "STM ready for firmware transfer");
+    ESP_LOGI(TAG, "STM prepared for firmware transfer");
     return true;
 }
 

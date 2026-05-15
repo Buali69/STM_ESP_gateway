@@ -10,6 +10,9 @@ idf_component_register(
         "src/crypto_helpers.cpp"
         "src/stm32_uart.cpp"
         "src/stm32_fw_transfer.cpp"
+        "src/stm_fw_storage.cpp"
+        "src/stm32_reset.cpp"
+        "src/stm_fw_provider.cpp"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -30,4 +33,5 @@ idf_component_register(
         lwip
         esp_driver_uart
         esp_driver_gpio
+        littlefs
 )

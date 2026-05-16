@@ -38,7 +38,9 @@
 #include "io/stm32_reset.h"
 
 namespace {
-static volatile bool g_stmOtaDevRequested = true;
+static volatile bool g_stmOtaDevRequested = false; //true;
+
+static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize);
 
 static const uint8_t* lastGoodFw = nullptr;
 static size_t lastGoodFwSize = 0;
@@ -96,6 +98,23 @@ static uint32_t nowMs() {
     return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 }
 
+enum class StmOtaState {
+    Idle,
+    Preparing,
+    Transferring,
+    WaitBootConfirm,
+    Confirmed,
+    Rollback,
+    Failed
+};
+
+struct StmOtaResult {
+    bool ok = false;
+    bool rollbackUsed = false;
+    StmOtaState finalState = StmOtaState::Idle;
+    const char* error = nullptr;
+};
+
 // ---- helper: send event to core (non-blocking) ----
 static inline void postEvt(CoreEvtType t, int32_t code = 0) {
     if (!evtQ) return;
@@ -123,6 +142,175 @@ static void copyStr(char* dst, size_t dstSize, const std::string& src) {
     const size_t n = (src.size() < (dstSize - 1)) ? src.size() : (dstSize - 1);
     memcpy(dst, src.data(), n);
     dst[n] = '\0';
+}
+
+static const char* stmOtaStateName(StmOtaState s)
+{
+    switch (s) {
+        case StmOtaState::Idle: return "Idle";
+        case StmOtaState::Preparing: return "Preparing";
+        case StmOtaState::Transferring: return "Transferring";
+        case StmOtaState::WaitBootConfirm: return "WaitBootConfirm";
+        case StmOtaState::Confirmed: return "Confirmed";
+        case StmOtaState::Rollback: return "Rollback";
+        case StmOtaState::Failed: return "Failed";
+        default: return "Unknown";
+    }
+}
+
+static void stmOtaSetState(StmOtaState& state, StmOtaState next)
+{
+    state = next;
+    ESP_LOGI(TAG, "STM OTA state -> %s", stmOtaStateName(state));
+}
+
+static StmOtaResult runStmOtaUpdateManaged(const uint8_t* fwData, uint32_t fwSize)
+{
+    StmOtaResult result{};
+    StmOtaState state = StmOtaState::Idle;
+
+    if (!fwData || fwSize == 0) {
+        result.error = "invalid firmware image";
+        result.finalState = StmOtaState::Failed;
+        return result;
+    }
+
+    stmOtaSetState(state, StmOtaState::Preparing);
+
+    stm32UartSetMode(Stm32UartMode::Control);
+    stm32ClearOtaReady();
+    stm32UartClearBootConfirmed();
+
+    stmReset();
+
+    const int64_t startUs = esp_timer_get_time();
+    const int64_t timeoutUs = 5000000LL;
+
+    while (!stm32IsOtaReady() &&
+           (esp_timer_get_time() - startUs) < timeoutUs) {
+        stm32UartProcess();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if (!stm32IsOtaReady()) {
+        result.error = "ota ready timeout";
+        stmOtaSetState(state, StmOtaState::Failed);
+        result.finalState = state;
+        return result;
+    }
+
+    stmOtaSetState(state, StmOtaState::Transferring);
+
+    if (!sendStmFirmware(fwData, fwSize)) {
+        result.error = "firmware transfer failed";
+        stmOtaSetState(state, StmOtaState::Failed);
+        result.finalState = state;
+        return result;
+    }
+
+    stmOtaSetState(state, StmOtaState::WaitBootConfirm);
+
+    stm32UartClearBootConfirmed();
+
+    TickType_t bootStart = xTaskGetTickCount();
+    TickType_t bootTimeout = pdMS_TO_TICKS(10000);
+
+    while ((xTaskGetTickCount() - bootStart) < bootTimeout) {
+        stm32UartProcess();
+
+        if (stm32UartIsBootConfirmed()) {
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (stm32UartIsBootConfirmed()) {
+        stmOtaSetState(state, StmOtaState::Confirmed);
+
+        if (stmFwStorageWriteKnownGood(fwData, fwSize)) {
+            ESP_LOGI(TAG, "Stored FW as persistent known-good");
+        } else {
+            ESP_LOGE(TAG, "Failed to store persistent known-good");
+        }
+
+        result.ok = true;
+        result.finalState = state;
+        return result;
+    }
+
+    result.error = "boot confirm timeout";
+    stmOtaSetState(state, StmOtaState::Rollback);
+
+    std::vector<uint8_t> rollbackFw;
+
+    if (!stmFwStorageReadKnownGood(rollbackFw)) {
+        result.error = "boot confirm timeout and no known-good available";
+        stmOtaSetState(state, StmOtaState::Failed);
+        result.finalState = state;
+        return result;
+    }
+
+    result.rollbackUsed = true;
+
+    ESP_LOGW(TAG, "ROLLBACK START: sending persistent known-good");
+
+    stm32UartSetMode(Stm32UartMode::Control);
+    stm32ClearOtaReady();
+    stm32UartClearBootConfirmed();
+
+    stmReset();
+
+    const int64_t rbStartUs = esp_timer_get_time();
+
+    while (!stm32IsOtaReady() &&
+           (esp_timer_get_time() - rbStartUs) < timeoutUs) {
+        stm32UartProcess();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if (!stm32IsOtaReady()) {
+        result.error = "rollback ota ready timeout";
+        stmOtaSetState(state, StmOtaState::Failed);
+        result.finalState = state;
+        return result;
+    }
+
+    if (!sendStmFirmware(rollbackFw.data(), rollbackFw.size())) {
+        result.error = "rollback transfer failed";
+        stmOtaSetState(state, StmOtaState::Failed);
+        result.finalState = state;
+        return result;
+    }
+
+    stm32UartClearBootConfirmed();
+
+    TickType_t rbBootStart = xTaskGetTickCount();
+
+    while ((xTaskGetTickCount() - rbBootStart) < bootTimeout) {
+        stm32UartProcess();
+
+        if (stm32UartIsBootConfirmed()) {
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (stm32UartIsBootConfirmed()) {
+        ESP_LOGW(TAG, "ROLLBACK SUCCESS: BOOT_OK received");
+        stmOtaSetState(state, StmOtaState::Confirmed);
+        result.ok = true;
+        result.rollbackUsed = true;
+        result.error = nullptr;
+        result.finalState = state;
+        return result;
+    }
+
+    result.error = "rollback no boot ok";
+    stmOtaSetState(state, StmOtaState::Failed);
+    result.finalState = state;
+    return result;
 }
 
 // Tuning
@@ -380,7 +568,16 @@ static bool runEmbeddedStmOtaDevTest()
     }
 
     ESP_LOGI(TAG, "STM embedded OTA dev test size=%" PRIu32, img.size);
-    return runStmOtaUpdate(img.data, img.size);
+    StmOtaResult r = runStmOtaUpdateManaged(img.data, img.size);
+
+    ESP_LOGI(TAG,
+            "STM OTA result ok=%d rollback=%d state=%s error=%s",
+            r.ok,
+            r.rollbackUsed,
+            stmOtaStateName(r.finalState),
+            r.error ? r.error : "none");
+
+    return r.ok;
 }
 
 // ---------------- IO TASK ----------------

@@ -13,6 +13,7 @@ idf_component_register(
         "src/stm_fw_storage.cpp"
         "src/stm32_reset.cpp"
         "src/stm_fw_provider.cpp"
+        "src/stm_fw_manifest.cpp"
     INCLUDE_DIRS
         "include"
     REQUIRES

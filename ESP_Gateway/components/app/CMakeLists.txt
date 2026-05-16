@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/tasks.cpp"
+        "src/stm_fw_version.cpp"
 
     INCLUDE_DIRS
         "include"
@@ -15,6 +16,7 @@ idf_component_register(
         log
         io
         core
+        nvs_flash
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE

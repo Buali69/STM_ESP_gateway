@@ -1,4 +1,5 @@
 #include "app/tasks.h"
+#include "app/stm_fw_version.h"
 
 #include <cinttypes>
 #include <inttypes.h>
@@ -36,9 +37,10 @@
 #include "io/stm_fw_storage.h"
 #include "io/stm_fw_provider.h"
 #include "io/stm32_reset.h"
+#include "io/stm_fw_manifest.h"
 
 namespace {
-static volatile bool g_stmOtaDevRequested = false; //true;
+static volatile bool g_stmOtaDevRequested = true;
 
 static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize);
 
@@ -567,15 +569,56 @@ static bool runEmbeddedStmOtaDevTest()
         return false;
     }
 
+    if (!stmFwManifestIsValid(img.manifest)) {
+        ESP_LOGE(TAG, "Invalid STM FW manifest");
+        return false;
+    }
+
+    ESP_LOGI(TAG,
+             "STM manifest ok: version=%" PRIu32 " size=%" PRIu32,
+             img.manifest.fwVersion,
+             img.manifest.fwSize);
+
+    if (!stmFwManifestSha256Matches(img.manifest, img.data, img.size)) {
+    ESP_LOGE(TAG, "STM FW SHA256 mismatch");
+    return false;
+    }
+    
+    uint32_t currentVersion = 0;
+
+    if (stmFwVersionLoad(currentVersion)) {
+        ESP_LOGI(TAG,
+                "Current STM FW version=%" PRIu32,
+                currentVersion);
+
+        if (img.manifest.fwVersion < currentVersion) {
+            ESP_LOGE(TAG,
+                    "STM FW rollback blocked: %" PRIu32 " < %" PRIu32,
+                    img.manifest.fwVersion,
+                    currentVersion);
+
+            return false;
+        }
+    }
+
     ESP_LOGI(TAG, "STM embedded OTA dev test size=%" PRIu32, img.size);
+
     StmOtaResult r = runStmOtaUpdateManaged(img.data, img.size);
 
     ESP_LOGI(TAG,
-            "STM OTA result ok=%d rollback=%d state=%s error=%s",
-            r.ok,
-            r.rollbackUsed,
-            stmOtaStateName(r.finalState),
-            r.error ? r.error : "none");
+             "STM OTA result ok=%d rollback=%d state=%s error=%s",
+             r.ok,
+             r.rollbackUsed,
+             stmOtaStateName(r.finalState),
+             r.error ? r.error : "none");
+
+    if (r.ok && !r.rollbackUsed) {
+        if (stmFwVersionStore(img.manifest.fwVersion)) {
+            ESP_LOGI(TAG,
+                    "Stored STM FW version=%" PRIu32,
+                    img.manifest.fwVersion);
+        }
+    }
 
     return r.ok;
 }

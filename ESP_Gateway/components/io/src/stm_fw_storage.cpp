@@ -8,6 +8,7 @@
 #include <cstring>
 
 static const char* TAG = "stm_fw_storage";
+static constexpr const char* CANDIDATE_PATH = "/stmfw/candidate.bin";
 
 static constexpr const char* BASE_PATH = "/stmfw";
 static constexpr const char* FW_PATH   = "/stmfw/known_good.bin";
@@ -183,4 +184,72 @@ void stmFwStorageClearKnownGood()
     remove(FW_PATH);
     remove(META_PATH);
     ESP_LOGW(TAG, "known-good cleared");
+}
+
+bool stmFwStorageWriteCandidate(const uint8_t* data, uint32_t size)
+{
+    if (!data || size == 0) {
+        ESP_LOGE(TAG, "Invalid candidate data");
+        return false;
+    }
+
+    FILE* fw = fopen(CANDIDATE_PATH, "wb");
+    if (!fw) {
+        ESP_LOGE(TAG, "Failed to open candidate file for write");
+        return false;
+    }
+
+    size_t written = fwrite(data, 1, size, fw);
+    fclose(fw);
+
+    if (written != size) {
+        ESP_LOGE(TAG, "Candidate write incomplete: %u/%u",
+                 static_cast<unsigned>(written),
+                 static_cast<unsigned>(size));
+        return false;
+    }
+
+    ESP_LOGI(TAG, "candidate stored size=%u", static_cast<unsigned>(size));
+    return true;
+}
+
+bool stmFwStorageReadCandidate(std::vector<uint8_t>& out)
+{
+    out.clear();
+
+    FILE* fw = fopen(CANDIDATE_PATH, "rb");
+    if (!fw) {
+        ESP_LOGW(TAG, "No candidate FW file");
+        return false;
+    }
+
+    fseek(fw, 0, SEEK_END);
+    long size = ftell(fw);
+    rewind(fw);
+
+    if (size <= 0) {
+        fclose(fw);
+        ESP_LOGE(TAG, "Candidate size invalid");
+        return false;
+    }
+
+    out.resize(static_cast<size_t>(size));
+
+    size_t read = fread(out.data(), 1, out.size(), fw);
+    fclose(fw);
+
+    if (read != out.size()) {
+        ESP_LOGE(TAG, "Candidate read incomplete");
+        out.clear();
+        return false;
+    }
+
+    ESP_LOGI(TAG, "candidate loaded size=%u", static_cast<unsigned>(out.size()));
+    return true;
+}
+
+void stmFwStorageClearCandidate()
+{
+    remove(CANDIDATE_PATH);
+    ESP_LOGI(TAG, "candidate cleared");
 }

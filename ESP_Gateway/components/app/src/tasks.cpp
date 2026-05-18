@@ -603,16 +603,54 @@ static bool runEmbeddedStmOtaDevTest()
 
     ESP_LOGI(TAG, "STM embedded OTA dev test size=%" PRIu32, img.size);
 
-    StmOtaResult r = runStmOtaUpdateManaged(img.data, img.size);
+    /*
+    * Stage candidate first.
+    * This simulates the later cloud-download flow:
+    * download -> store candidate -> verify -> flash STM.
+    */
+    if (!stmFwStorageWriteCandidate(img.data, img.size)) {
+        ESP_LOGE(TAG, "Failed to store STM candidate");
+        return false;
+    }
+
+    std::vector<uint8_t> candidateFw;
+
+    if (!stmFwStorageReadCandidate(candidateFw)) {
+        ESP_LOGE(TAG, "Failed to load STM candidate");
+        return false;
+    }
+
+    if (candidateFw.size() != img.manifest.fwSize) {
+        ESP_LOGE(TAG,
+                "Candidate size mismatch: got=%u expected=%" PRIu32,
+                static_cast<unsigned>(candidateFw.size()),
+                img.manifest.fwSize);
+        return false;
+    }
+
+    if (!stmFwManifestSha256Matches(
+            img.manifest,
+            candidateFw.data(),
+            static_cast<uint32_t>(candidateFw.size()))) {
+        ESP_LOGE(TAG, "Candidate SHA256 mismatch");
+        return false;
+    }
+
+    StmOtaResult r = runStmOtaUpdateManaged(
+        candidateFw.data(),
+        static_cast<uint32_t>(candidateFw.size())
+    );
 
     ESP_LOGI(TAG,
-             "STM OTA result ok=%d rollback=%d state=%s error=%s",
-             r.ok,
-             r.rollbackUsed,
-             stmOtaStateName(r.finalState),
-             r.error ? r.error : "none");
+            "STM OTA result ok=%d rollback=%d state=%s error=%s",
+            r.ok,
+            r.rollbackUsed,
+            stmOtaStateName(r.finalState),
+            r.error ? r.error : "none");
 
     if (r.ok && !r.rollbackUsed) {
+        stmFwStorageClearCandidate();
+
         if (stmFwVersionStore(img.manifest.fwVersion)) {
             ESP_LOGI(TAG,
                     "Stored STM FW version=%" PRIu32,

@@ -9,6 +9,7 @@
 
 static const char* TAG = "stm_fw_storage";
 static constexpr const char* CANDIDATE_PATH = "/stmfw/candidate.bin";
+static constexpr const char* CANDIDATE_MANIFEST_PATH = "/stmfw/candidate.manifest";
 
 static constexpr const char* BASE_PATH = "/stmfw";
 static constexpr const char* FW_PATH   = "/stmfw/known_good.bin";
@@ -252,4 +253,58 @@ void stmFwStorageClearCandidate()
 {
     remove(CANDIDATE_PATH);
     ESP_LOGI(TAG, "candidate cleared");
+}
+
+bool stmFwStorageWriteCandidateManifest(const StmFwManifest& manifest)
+{
+    FILE* f = fopen(CANDIDATE_MANIFEST_PATH, "wb");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open candidate manifest for write");
+        return false;
+    }
+
+    size_t written = fwrite(&manifest, 1, sizeof(manifest), f);
+    fclose(f);
+
+    if (written != sizeof(manifest)) {
+        ESP_LOGE(TAG, "Candidate manifest write incomplete");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "candidate manifest stored version=%" PRIu32 " size=%" PRIu32,
+             manifest.fwVersion,
+             manifest.fwSize);
+
+    return true;
+}
+
+bool stmFwStorageReadCandidateManifest(StmFwManifest& manifest)
+{
+    memset(&manifest, 0, sizeof(manifest));
+
+    FILE* f = fopen(CANDIDATE_MANIFEST_PATH, "rb");
+    if (!f) {
+        ESP_LOGW(TAG, "No candidate manifest");
+        return false;
+    }
+
+    size_t read = fread(&manifest, 1, sizeof(manifest), f);
+    fclose(f);
+
+    if (read != sizeof(manifest)) {
+        ESP_LOGE(TAG, "Candidate manifest read incomplete");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "candidate manifest loaded version=%" PRIu32 " size=%" PRIu32,
+             manifest.fwVersion,
+             manifest.fwSize);
+
+    return true;
+}
+
+void stmFwStorageClearCandidateManifest()
+{
+    remove(CANDIDATE_MANIFEST_PATH);
+    ESP_LOGI(TAG, "candidate manifest cleared");
 }

@@ -580,36 +580,33 @@ static bool runEmbeddedStmOtaDevTest()
              img.manifest.fwSize);
 
     if (!stmFwManifestSha256Matches(img.manifest, img.data, img.size)) {
-    ESP_LOGE(TAG, "STM FW SHA256 mismatch");
-    return false;
+        ESP_LOGE(TAG, "STM FW SHA256 mismatch");
+        return false;
     }
-    
+
     uint32_t currentVersion = 0;
 
     if (stmFwVersionLoad(currentVersion)) {
-        ESP_LOGI(TAG,
-                "Current STM FW version=%" PRIu32,
-                currentVersion);
+        ESP_LOGI(TAG, "Current STM FW version=%" PRIu32, currentVersion);
 
         if (img.manifest.fwVersion < currentVersion) {
             ESP_LOGE(TAG,
-                    "STM FW rollback blocked: %" PRIu32 " < %" PRIu32,
-                    img.manifest.fwVersion,
-                    currentVersion);
-
+                     "STM FW rollback blocked: %" PRIu32 " < %" PRIu32,
+                     img.manifest.fwVersion,
+                     currentVersion);
             return false;
         }
     }
 
     ESP_LOGI(TAG, "STM embedded OTA dev test size=%" PRIu32, img.size);
 
-    /*
-    * Stage candidate first.
-    * This simulates the later cloud-download flow:
-    * download -> store candidate -> verify -> flash STM.
-    */
     if (!stmFwStorageWriteCandidate(img.data, img.size)) {
         ESP_LOGE(TAG, "Failed to store STM candidate");
+        return false;
+    }
+
+    if (!stmFwStorageWriteCandidateManifest(img.manifest)) {
+        ESP_LOGE(TAG, "Failed to store STM candidate manifest");
         return false;
     }
 
@@ -620,16 +617,28 @@ static bool runEmbeddedStmOtaDevTest()
         return false;
     }
 
-    if (candidateFw.size() != img.manifest.fwSize) {
+    StmFwManifest stagedManifest{};
+
+    if (!stmFwStorageReadCandidateManifest(stagedManifest)) {
+        ESP_LOGE(TAG, "Failed to load STM candidate manifest");
+        return false;
+    }
+
+    if (!stmFwManifestIsValid(stagedManifest)) {
+        ESP_LOGE(TAG, "Invalid staged STM candidate manifest");
+        return false;
+    }
+
+    if (candidateFw.size() != stagedManifest.fwSize) {
         ESP_LOGE(TAG,
-                "Candidate size mismatch: got=%u expected=%" PRIu32,
-                static_cast<unsigned>(candidateFw.size()),
-                img.manifest.fwSize);
+                 "Candidate size mismatch: got=%u expected=%" PRIu32,
+                 static_cast<unsigned>(candidateFw.size()),
+                 stagedManifest.fwSize);
         return false;
     }
 
     if (!stmFwManifestSha256Matches(
-            img.manifest,
+            stagedManifest,
             candidateFw.data(),
             static_cast<uint32_t>(candidateFw.size()))) {
         ESP_LOGE(TAG, "Candidate SHA256 mismatch");
@@ -642,19 +651,20 @@ static bool runEmbeddedStmOtaDevTest()
     );
 
     ESP_LOGI(TAG,
-            "STM OTA result ok=%d rollback=%d state=%s error=%s",
-            r.ok,
-            r.rollbackUsed,
-            stmOtaStateName(r.finalState),
-            r.error ? r.error : "none");
+             "STM OTA result ok=%d rollback=%d state=%s error=%s",
+             r.ok,
+             r.rollbackUsed,
+             stmOtaStateName(r.finalState),
+             r.error ? r.error : "none");
 
     if (r.ok && !r.rollbackUsed) {
         stmFwStorageClearCandidate();
+        stmFwStorageClearCandidateManifest();
 
-        if (stmFwVersionStore(img.manifest.fwVersion)) {
+        if (stmFwVersionStore(stagedManifest.fwVersion)) {
             ESP_LOGI(TAG,
-                    "Stored STM FW version=%" PRIu32,
-                    img.manifest.fwVersion);
+                     "Stored STM FW version=%" PRIu32,
+                     stagedManifest.fwVersion);
         }
     }
 

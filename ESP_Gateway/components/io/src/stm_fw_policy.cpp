@@ -23,10 +23,14 @@ StmFwPolicyResult stmFwPolicyAcceptCandidate(
     if (manifest.fwVersion < currentVersion) {
         return {false, "version rollback blocked"};
     }
-
+    
     if (stmFwManifestRequiresSignature(manifest)) {
         if (!stmFwManifestHasSignature(manifest)) {
             return {false, "signature required but missing"};
+        }
+
+        if (manifest.signatureAlg != STM_FW_SIG_ECDSA_P256_SHA256) {
+            return {false, "unsupported signature algorithm"};
         }
 
         if (!stmFwSignatureVerifyManifest(manifest)) {

@@ -15,12 +15,16 @@ struct StmFwManifest {
 
     uint32_t flags;
 
+    uint32_t signatureAlg;
+
     uint8_t signature[64];
 };
 
 extern const uint32_t STM_FW_MANIFEST_MAGIC;
 
 static constexpr uint32_t STM_FW_FLAG_SIGNATURE_REQUIRED = 0x00000001;
+static constexpr uint32_t STM_FW_SIG_NONE = 0;
+static constexpr uint32_t STM_FW_SIG_ECDSA_P256_SHA256 = 1;
 
 bool stmFwManifestIsValid(const StmFwManifest& m);
 

@@ -56,6 +56,7 @@ bool stmFwGetEmbeddedTest(StmFirmwareImage& img)
     img.manifest.fwSize = img.size;
     img.manifest.flags = 0;
     //img.manifest.flags = STM_FW_FLAG_SIGNATURE_REQUIRED;
+    img.manifest.signatureAlg = STM_FW_SIG_NONE;
 
     if (!calcSha256(img.data, img.size, img.manifest.sha256)) {
         return false;

@@ -88,7 +88,7 @@ bool stmFwManifestComputeSignedHash(
         return false;
     }
 
-    uint8_t buf[4 + 4 + 4 + 4 + 4 + 32 + 4];
+    uint8_t buf[4 + 4 + 4 + 4 + 4 + 32 + 4 + 4];
     size_t pos = 0;
 
     writeU32Le(buf, pos, manifest.magic);
@@ -96,11 +96,11 @@ bool stmFwManifestComputeSignedHash(
     writeU32Le(buf, pos, manifest.fwVersion);
     writeU32Le(buf, pos, manifest.minBootloaderVersion);
     writeU32Le(buf, pos, manifest.fwSize);
+    writeU32Le(buf, pos, manifest.flags);
+    writeU32Le(buf, pos, manifest.signatureAlg);
 
     memcpy(&buf[pos], manifest.sha256, 32);
     pos += 32;
-
-    writeU32Le(buf, pos, manifest.flags);
 
     static bool psaReady = false;
 

@@ -15,6 +15,8 @@ idf_component_register(
         "src/stm_fw_provider.cpp"
         "src/stm_fw_manifest.cpp"
         "src/stm_fw_policy.cpp"
+        "src/stm_fw_signature.cpp"
+        "src/stm_fw_trust.cpp"
     INCLUDE_DIRS
         "include"
     REQUIRES

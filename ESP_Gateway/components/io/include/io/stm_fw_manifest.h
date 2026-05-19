@@ -24,11 +24,8 @@ static constexpr uint32_t STM_FW_FLAG_SIGNATURE_REQUIRED = 0x00000001;
 
 bool stmFwManifestIsValid(const StmFwManifest& m);
 
-bool stmFwManifestSha256Matches(
-    const StmFwManifest& m,
-    const uint8_t* data,
-    uint32_t size
-);
+bool stmFwManifestSha256Matches(const StmFwManifest& m, const uint8_t* data, uint32_t size);
+bool stmFwManifestComputeSignedHash(const StmFwManifest& manifest, uint8_t outSha256[32]);
 
 bool stmFwManifestRequiresSignature(const StmFwManifest& m);
 bool stmFwManifestHasSignature(const StmFwManifest& m);

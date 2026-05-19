@@ -1,4 +1,5 @@
 #include "io/stm_fw_policy.h"
+#include "io/stm_fw_signature.h"
 
 StmFwPolicyResult stmFwPolicyAcceptCandidate(
     const StmFwManifest& manifest,
@@ -23,9 +24,14 @@ StmFwPolicyResult stmFwPolicyAcceptCandidate(
         return {false, "version rollback blocked"};
     }
 
-    if (stmFwManifestRequiresSignature(manifest) &&
-        !stmFwManifestHasSignature(manifest)) {
-        return {false, "signature required but missing"};
+    if (stmFwManifestRequiresSignature(manifest)) {
+        if (!stmFwManifestHasSignature(manifest)) {
+            return {false, "signature required but missing"};
+        }
+
+        if (!stmFwSignatureVerifyManifest(manifest)) {
+            return {false, "signature verification failed"};
+        }
     }
 
     return {true, nullptr};

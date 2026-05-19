@@ -65,3 +65,8 @@ bool stmFwManifestSha256Matches(
 
     return memcmp(calc, m.sha256, sizeof(calc)) == 0;
 }
+
+bool stmFwManifestRequiresSignature(const StmFwManifest& m)
+{
+    return (m.flags & STM_FW_FLAG_SIGNATURE_REQUIRED) != 0;
+}

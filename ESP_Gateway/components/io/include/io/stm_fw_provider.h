@@ -21,3 +21,5 @@ struct StmFirmwareImage {
 
 bool stmFwGetEmbeddedTest(StmFirmwareImage& img);
 bool stmFwGetKnownGood(std::vector<uint8_t>& fw);
+
+bool stmFwManifestHasSignature(const StmFwManifest& m);

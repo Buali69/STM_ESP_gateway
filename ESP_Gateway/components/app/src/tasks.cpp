@@ -38,6 +38,7 @@
 #include "io/stm_fw_provider.h"
 #include "io/stm32_reset.h"
 #include "io/stm_fw_manifest.h"
+#include "io/stm_fw_policy.h"
 
 namespace {
 static volatile bool g_stmOtaDevRequested = true;
@@ -569,36 +570,10 @@ static bool runEmbeddedStmOtaDevTest()
         return false;
     }
 
-    if (!stmFwManifestIsValid(img.manifest)) {
-        ESP_LOGE(TAG, "Invalid STM FW manifest");
-        return false;
-    }
-
     ESP_LOGI(TAG,
-             "STM manifest ok: version=%" PRIu32 " size=%" PRIu32,
+             "STM embedded manifest: version=%" PRIu32 " size=%" PRIu32,
              img.manifest.fwVersion,
              img.manifest.fwSize);
-
-    if (!stmFwManifestSha256Matches(img.manifest, img.data, img.size)) {
-        ESP_LOGE(TAG, "STM FW SHA256 mismatch");
-        return false;
-    }
-
-    uint32_t currentVersion = 0;
-
-    if (stmFwVersionLoad(currentVersion)) {
-        ESP_LOGI(TAG, "Current STM FW version=%" PRIu32, currentVersion);
-
-        if (img.manifest.fwVersion < currentVersion) {
-            ESP_LOGE(TAG,
-                     "STM FW rollback blocked: %" PRIu32 " < %" PRIu32,
-                     img.manifest.fwVersion,
-                     currentVersion);
-            return false;
-        }
-    }
-
-    ESP_LOGI(TAG, "STM embedded OTA dev test size=%" PRIu32, img.size);
 
     if (!stmFwStorageWriteCandidate(img.data, img.size)) {
         ESP_LOGE(TAG, "Failed to store STM candidate");
@@ -624,26 +599,33 @@ static bool runEmbeddedStmOtaDevTest()
         return false;
     }
 
-    if (!stmFwManifestIsValid(stagedManifest)) {
-        ESP_LOGE(TAG, "Invalid staged STM candidate manifest");
+    uint32_t currentVersion = 0;
+
+    if (stmFwVersionLoad(currentVersion)) {
+        ESP_LOGI(TAG, "Current STM FW version=%" PRIu32, currentVersion);
+    }
+
+    ESP_LOGI(TAG,
+             "STM staged manifest: version=%" PRIu32
+             " size=%" PRIu32
+             " signature=%d",
+             stagedManifest.fwVersion,
+             stagedManifest.fwSize,
+             stmFwManifestHasSignature(stagedManifest));
+
+    StmFwPolicyResult policy = stmFwPolicyAcceptCandidate(
+        stagedManifest,
+        candidateFw.data(),
+        static_cast<uint32_t>(candidateFw.size()),
+        currentVersion
+    );
+
+    if (!policy.accepted) {
+        ESP_LOGE(TAG, "STM candidate rejected: %s", policy.reason);
         return false;
     }
 
-    if (candidateFw.size() != stagedManifest.fwSize) {
-        ESP_LOGE(TAG,
-                 "Candidate size mismatch: got=%u expected=%" PRIu32,
-                 static_cast<unsigned>(candidateFw.size()),
-                 stagedManifest.fwSize);
-        return false;
-    }
-
-    if (!stmFwManifestSha256Matches(
-            stagedManifest,
-            candidateFw.data(),
-            static_cast<uint32_t>(candidateFw.size()))) {
-        ESP_LOGE(TAG, "Candidate SHA256 mismatch");
-        return false;
-    }
+    ESP_LOGI(TAG, "STM candidate accepted by policy");
 
     StmOtaResult r = runStmOtaUpdateManaged(
         candidateFw.data(),

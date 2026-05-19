@@ -47,12 +47,14 @@ bool stmFwGetEmbeddedTest(StmFirmwareImage& img)
     }
 
     memset(&img.manifest, 0, sizeof(img.manifest));
+    memset(img.manifest.signature, 0, sizeof(img.manifest.signature));
 
     img.manifest.magic = STM_FW_MANIFEST_MAGIC;
     img.manifest.manifestVersion = 1;
     img.manifest.fwVersion = 1;
     img.manifest.minBootloaderVersion = 1;
     img.manifest.fwSize = img.size;
+    img.manifest.flags = 0;
 
     if (!calcSha256(img.data, img.size, img.manifest.sha256)) {
         return false;
@@ -64,4 +66,15 @@ bool stmFwGetEmbeddedTest(StmFirmwareImage& img)
 bool stmFwGetKnownGood(std::vector<uint8_t>& fw)
 {
     return stmFwStorageReadKnownGood(fw);
+}
+
+bool stmFwManifestHasSignature(const StmFwManifest& m)
+{
+    for (size_t i = 0; i < sizeof(m.signature); ++i) {
+        if (m.signature[i] != 0) {
+            return true;
+        }
+    }
+
+    return false;
 }

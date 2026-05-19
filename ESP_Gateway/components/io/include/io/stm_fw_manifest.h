@@ -14,7 +14,13 @@ struct StmFwManifest {
     uint8_t sha256[32];
 
     uint32_t flags;
+
+    uint8_t signature[64];
 };
+
+extern const uint32_t STM_FW_MANIFEST_MAGIC;
+
+static constexpr uint32_t STM_FW_FLAG_SIGNATURE_REQUIRED = 0x00000001;
 
 bool stmFwManifestIsValid(const StmFwManifest& m);
 
@@ -24,4 +30,7 @@ bool stmFwManifestSha256Matches(
     uint32_t size
 );
 
-extern const uint32_t STM_FW_MANIFEST_MAGIC;
+bool stmFwManifestRequiresSignature(const StmFwManifest& m);
+bool stmFwManifestHasSignature(const StmFwManifest& m);
+
+

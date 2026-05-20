@@ -680,102 +680,12 @@ static bool runEmbeddedStmOtaDevTest()
         return false;
     }
 
-    return runStagedStmOtaCandidate();
+    requestStagedStmOta();
+    return true;
+   // return runStagedStmOtaCandidate();
 }
 
-/*
-static bool runEmbeddedStmOtaDevTest()
-{
-    StmFirmwareImage img{};
 
-    if (!stmFwGetEmbeddedTest(img)) {
-        ESP_LOGE(TAG, "No embedded STM test firmware");
-        return false;
-    }
-
-    ESP_LOGI(TAG,
-             "STM embedded manifest: version=%" PRIu32 " size=%" PRIu32,
-             img.manifest.fwVersion,
-             img.manifest.fwSize);
-
-    if (!stmFwStorageWriteCandidate(img.data, img.size)) {
-        ESP_LOGE(TAG, "Failed to store STM candidate");
-        return false;
-    }
-
-    if (!stmFwStorageWriteCandidateManifest(img.manifest)) {
-        ESP_LOGE(TAG, "Failed to store STM candidate manifest");
-        return false;
-    }
-
-    std::vector<uint8_t> candidateFw;
-
-    if (!stmFwStorageReadCandidate(candidateFw)) {
-        ESP_LOGE(TAG, "Failed to load STM candidate");
-        return false;
-    }
-
-    StmFwManifest stagedManifest{};
-
-    if (!stmFwStorageReadCandidateManifest(stagedManifest)) {
-        ESP_LOGE(TAG, "Failed to load STM candidate manifest");
-        return false;
-    }
-
-    uint32_t currentVersion = 0;
-
-    if (stmFwVersionLoad(currentVersion)) {
-        ESP_LOGI(TAG, "Current STM FW version=%" PRIu32, currentVersion);
-    }
-
-    ESP_LOGI(TAG,
-             "STM staged manifest: version=%" PRIu32
-             " size=%" PRIu32
-             " signature=%d",
-             stagedManifest.fwVersion,
-             stagedManifest.fwSize,
-             stmFwManifestHasSignature(stagedManifest));
-
-    StmFwPolicyResult policy = stmFwPolicyAcceptCandidate(
-        stagedManifest,
-        candidateFw.data(),
-        static_cast<uint32_t>(candidateFw.size()),
-        currentVersion
-    );
-
-    if (!policy.accepted) {
-        ESP_LOGE(TAG, "STM candidate rejected: %s", policy.reason);
-        return false;
-    }
-
-    ESP_LOGI(TAG, "STM candidate accepted by policy");
-
-    StmOtaResult r = runStmOtaUpdateManaged(
-        candidateFw.data(),
-        static_cast<uint32_t>(candidateFw.size())
-    );
-
-    ESP_LOGI(TAG,
-             "STM OTA result ok=%d rollback=%d state=%s error=%s",
-             r.ok,
-             r.rollbackUsed,
-             stmOtaStateName(r.finalState),
-             r.error ? r.error : "none");
-
-    if (r.ok && !r.rollbackUsed) {
-        stmFwStorageClearCandidate();
-        stmFwStorageClearCandidateManifest();
-
-        if (stmFwVersionStore(stagedManifest.fwVersion)) {
-            ESP_LOGI(TAG,
-                     "Stored STM FW version=%" PRIu32,
-                     stagedManifest.fwVersion);
-        }
-    }
-
-    return r.ok;
-}
-    */
 
 // ---------------- IO TASK ----------------
 static void ioTask(void*) {
@@ -798,35 +708,7 @@ static void ioTask(void*) {
         ESP_LOGI(TAG, "STM32 UART ready");
     }
     
- //   g_stmOtaDevRequested = true;
-
-    /*
-    static bool testSent = false;
-
-    if (!testSent) {
-        testSent = true;
-        stm32ClearOtaReady();
-
-        ESP_LOGI(TAG, "Waiting for STM OTA_READY...");
-
-        const int64_t start = esp_timer_get_time();
-
-        while (!stm32IsOtaReady() &&
-            (esp_timer_get_time() - start) < 5000000LL) {
-
-            stm32UartProcess();
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-
-        ESP_LOGI(TAG, "Wait finished, otaReady=%d", stm32IsOtaReady());
-
-        if (!stm32IsOtaReady()) {
-            ESP_LOGE(TAG, "STM bootloader OTA_READY timeout");
-        } else {
-            ESP_LOGI(TAG, "STM bootloader ready, starting STM OTA");
-            runStmOtaTest();
-        }
-    }   */
+ 
 
     IoState st = IoState::WAIT_WIFI;
     bool printedIp = false;

@@ -42,6 +42,7 @@
 
 namespace {
 static volatile bool g_stmOtaDevRequested = true;
+static volatile bool g_stmOtaStagedRequested = false;
 
 static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize);
 
@@ -136,6 +137,11 @@ struct SensorRetry {
 };
 
 static SensorRetry sRetry;
+
+void requestStagedStmOta()
+{
+    g_stmOtaStagedRequested = true;
+}
 
 static void copyStr(char* dst, size_t dstSize, const std::string& src) {
     if (!dst || dstSize == 0) {
@@ -838,6 +844,16 @@ static void ioTask(void*) {
 
             ESP_LOGI(TAG, "Manual STM OTA dev test requested");
             runEmbeddedStmOtaDevTest();
+        }
+
+        if (g_stmOtaStagedRequested) {
+            g_stmOtaStagedRequested = false;
+
+            ESP_LOGI(TAG, "Staged STM OTA requested");
+
+            bool ok = runStagedStmOtaCandidate();
+
+            ESP_LOGI(TAG, "Staged STM OTA finished ok=%d", ok);
         }
 
         const uint32_t now = nowMs();

@@ -561,6 +561,123 @@ if (!stm32IsOtaReady()) {
     return ok;
 }
 
+static bool stageStmFirmwareCandidate(const uint8_t* fwData, uint32_t fwSize, const StmFwManifest& manifest)
+{
+    if (!fwData || fwSize == 0) {
+        ESP_LOGE(TAG, "Invalid STM candidate data");
+        return false;
+    }
+
+    if (!stmFwStorageWriteCandidate(fwData, fwSize)) {
+        ESP_LOGE(TAG, "Failed to store STM candidate");
+        return false;
+    }
+
+    if (!stmFwStorageWriteCandidateManifest(manifest)) {
+        ESP_LOGE(TAG, "Failed to store STM candidate manifest");
+        return false;
+    }
+
+    ESP_LOGI(TAG,
+             "STM candidate staged: version=%" PRIu32 " size=%" PRIu32,
+             manifest.fwVersion,
+             manifest.fwSize);
+
+    return true;
+}
+
+static bool runStagedStmOtaCandidate()
+{
+    std::vector<uint8_t> candidateFw;
+
+    if (!stmFwStorageReadCandidate(candidateFw)) {
+        ESP_LOGE(TAG, "Failed to load STM candidate");
+        return false;
+    }
+
+    StmFwManifest stagedManifest{};
+
+    if (!stmFwStorageReadCandidateManifest(stagedManifest)) {
+        ESP_LOGE(TAG, "Failed to load STM candidate manifest");
+        return false;
+    }
+
+    uint32_t currentVersion = 0;
+
+    if (stmFwVersionLoad(currentVersion)) {
+        ESP_LOGI(TAG, "Current STM FW version=%" PRIu32, currentVersion);
+    }
+
+    ESP_LOGI(TAG,
+             "STM staged manifest: version=%" PRIu32
+             " size=%" PRIu32
+             " signature=%d",
+             stagedManifest.fwVersion,
+             stagedManifest.fwSize,
+             stmFwManifestHasSignature(stagedManifest));
+
+    StmFwPolicyResult policy = stmFwPolicyAcceptCandidate(
+        stagedManifest,
+        candidateFw.data(),
+        static_cast<uint32_t>(candidateFw.size()),
+        currentVersion
+    );
+
+    if (!policy.accepted) {
+        ESP_LOGE(TAG, "STM candidate rejected: %s", policy.reason);
+        return false;
+    }
+
+    ESP_LOGI(TAG, "STM candidate accepted by policy");
+
+    StmOtaResult r = runStmOtaUpdateManaged(
+        candidateFw.data(),
+        static_cast<uint32_t>(candidateFw.size())
+    );
+
+    ESP_LOGI(TAG,
+             "STM OTA result ok=%d rollback=%d state=%s error=%s",
+             r.ok,
+             r.rollbackUsed,
+             stmOtaStateName(r.finalState),
+             r.error ? r.error : "none");
+
+    if (r.ok && !r.rollbackUsed) {
+        stmFwStorageClearCandidate();
+        stmFwStorageClearCandidateManifest();
+
+        if (stmFwVersionStore(stagedManifest.fwVersion)) {
+            ESP_LOGI(TAG,
+                     "Stored STM FW version=%" PRIu32,
+                     stagedManifest.fwVersion);
+        }
+    }
+
+    return r.ok;
+}
+
+static bool runEmbeddedStmOtaDevTest()
+{
+    StmFirmwareImage img{};
+
+    if (!stmFwGetEmbeddedTest(img)) {
+        ESP_LOGE(TAG, "No embedded STM test firmware");
+        return false;
+    }
+
+    ESP_LOGI(TAG,
+             "STM embedded manifest: version=%" PRIu32 " size=%" PRIu32,
+             img.manifest.fwVersion,
+             img.manifest.fwSize);
+
+    if (!stageStmFirmwareCandidate(img.data, img.size, img.manifest)) {
+        return false;
+    }
+
+    return runStagedStmOtaCandidate();
+}
+
+/*
 static bool runEmbeddedStmOtaDevTest()
 {
     StmFirmwareImage img{};
@@ -652,6 +769,7 @@ static bool runEmbeddedStmOtaDevTest()
 
     return r.ok;
 }
+    */
 
 // ---------------- IO TASK ----------------
 static void ioTask(void*) {

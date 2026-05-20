@@ -20,6 +20,11 @@ struct StmFwManifest {
     uint8_t signature[64];
 };
 
+enum class StmFwManifestSource {
+    EmbeddedDev,
+    Server,
+};
+
 extern const uint32_t STM_FW_MANIFEST_MAGIC;
 
 static constexpr uint32_t STM_FW_FLAG_SIGNATURE_REQUIRED = 0x00000001;
@@ -33,5 +38,7 @@ bool stmFwManifestComputeSignedHash(const StmFwManifest& manifest, uint8_t outSh
 
 bool stmFwManifestRequiresSignature(const StmFwManifest& m);
 bool stmFwManifestHasSignature(const StmFwManifest& m);
+
+bool stmFwStageCandidate(const uint8_t* fwData, uint32_t fwSize, const StmFwManifest& manifest);
 
 

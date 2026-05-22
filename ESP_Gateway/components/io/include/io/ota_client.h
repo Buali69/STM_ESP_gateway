@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+
 enum class ConfirmFwResult {
     Confirmed,
     NoPendingJob,
@@ -17,6 +18,8 @@ struct OtaJob {
     std::string sha256hex;
     std::string url;
     std::string signatureBase64;
+    bool isStm = false;
+    uint32_t stmFwVersion = 0;
 };
 
 enum class OtaError {

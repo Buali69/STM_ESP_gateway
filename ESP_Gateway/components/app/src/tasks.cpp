@@ -9,6 +9,7 @@
 #include <string>
 #include <cstring>
 #include <vector>
+#include <array>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -39,9 +40,12 @@
 #include "io/stm32_reset.h"
 #include "io/stm_fw_manifest.h"
 #include "io/stm_fw_policy.h"
+#include "io/crypto_helpers.h"
+
+#include "esp_system.h"
 
 namespace {
-static volatile bool g_stmOtaDevRequested = true;
+static volatile bool g_stmOtaDevRequested = false; //true;
 static volatile bool g_stmOtaStagedRequested = false;
 
 static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize);
@@ -74,6 +78,48 @@ static QueueHandle_t ioQ  = nullptr; // Core -> IO
 static QueueHandle_t evtQ = nullptr; // IO   -> Core
 static QueueHandle_t otaQ = nullptr;
 
+enum class StmOtaRequestSource : uint8_t {
+    DevEmbedded,
+    Server,
+    Manual,
+    Rollback
+};
+
+static bool runServerStmOtaJob(const OtaJob& job);
+
+static const char* stmOtaSourceText(StmOtaRequestSource s)
+{
+    switch (s) {
+
+        case StmOtaRequestSource::DevEmbedded:
+            return "DevEmbedded";
+
+        case StmOtaRequestSource::Server:
+            return "Server";
+
+        case StmOtaRequestSource::Manual:
+            return "Manual";
+
+        case StmOtaRequestSource::Rollback:
+            return "Rollback";
+
+        default:
+            return "Unknown";
+    }
+}
+
+struct StmOtaContext {
+    StmOtaRequestSource source =
+    StmOtaRequestSource::DevEmbedded;
+    uint32_t fwVersion = 0;
+    uint64_t jobId = 0;
+    bool rollback = false;
+    bool signatureRequired = false;
+    bool signaturePresent = false;
+};
+
+static StmOtaContext g_stmOtaCtx{};
+
 struct OtaTaskMsg {
     uint64_t job_id = 0;
     uint64_t file_id = 0;
@@ -82,8 +128,9 @@ struct OtaTaskMsg {
     char sha256hex[65] = {0};
     char url[256] = {0};
     char signatureBase64[192] = {0};
+    bool isStm = false;
+    uint32_t stmFwVersion = 0;
 };
-
 static bool otaRunning = false;
 
 enum class IoState : uint8_t {
@@ -322,6 +369,151 @@ static StmOtaResult runStmOtaUpdateManaged(const uint8_t* fwData, uint32_t fwSiz
     return result;
 }
 
+static bool runServerStmOtaJob(const OtaJob& job)
+{
+    ESP_LOGI(TAG,
+             "runServerStmOtaJob job=%llu version=%" PRIu32
+             " url=%s size=%lld sha=%s",
+             (unsigned long long)job.job_id,
+             job.stmFwVersion,
+             job.url.c_str(),
+             (long long)job.size,
+             job.sha256hex.c_str());
+
+    if (job.url.empty() ||
+        job.sha256hex.size() != 64 ||
+        job.size <= 0 ||
+        job.stmFwVersion == 0) {
+        ESP_LOGE(TAG, "invalid STM server job");
+        return false;
+    }
+
+    FILE* f = fopen("/stmfw/candidate.bin", "wb");
+    if (!f) {
+        ESP_LOGE(TAG, "failed to open STM candidate for write");
+        return false;
+    }
+
+    Sha256Stream sha;
+    if (!sha.begin()) {
+        fclose(f);
+        ESP_LOGE(TAG, "sha.begin failed");
+        return false;
+    }
+
+    size_t received = 0;
+
+    auto handler = [&](const uint8_t* data,
+                       size_t len,
+                       long long contentLength) -> bool {
+        if (!data || len == 0) {
+            return true;
+        }
+
+        if (!sha.update(data, len)) {
+            ESP_LOGE(TAG, "sha.update failed");
+            return false;
+        }
+
+        const size_t written = fwrite(data, 1, len, f);
+        if (written != len) {
+            ESP_LOGE(TAG, "candidate fwrite failed");
+            return false;
+        }
+
+        received += len;
+
+        return true;
+    };
+
+    int httpCode = 0;
+    const bool httpOk = httpsGetStream(job.url, handler, &httpCode);
+
+    fclose(f);
+
+    if (!httpOk || httpCode != 200) {
+        ESP_LOGE(TAG, "STM candidate download failed http=%d", httpCode);
+        remove("/stmfw/candidate.bin");
+        return false;
+    }
+
+    if (received != static_cast<size_t>(job.size)) {
+        ESP_LOGE(TAG,
+                 "STM candidate size mismatch received=%u expected=%lld",
+                 (unsigned)received,
+                 (long long)job.size);
+        remove("/stmfw/candidate.bin");
+        return false;
+    }
+
+    std::array<uint8_t, 32> dig{};
+    if (!sha.finish(dig.data())) {
+        ESP_LOGE(TAG, "sha.finish failed");
+        remove("/stmfw/candidate.bin");
+        return false;
+    }
+
+    char hexBuf[65] = {};
+
+    for (size_t i = 0; i < 32; ++i) {
+        snprintf(&hexBuf[i * 2],
+                3,
+                "%02x",
+                dig[i]);
+    }
+
+    const std::string gotHex(hexBuf);
+
+    if (gotHex != job.sha256hex) {
+        ESP_LOGE(TAG,
+                 "STM candidate sha mismatch got=%s expected=%s",
+                 gotHex.c_str(),
+                 job.sha256hex.c_str());
+        remove("/stmfw/candidate.bin");
+        return false;
+    }
+
+    ESP_LOGI(TAG,
+             "STM candidate downloaded ok size=%u sha=%s",
+             (unsigned)received,
+             gotHex.c_str());
+
+    StmFwManifest manifest{};
+    manifest.magic = STM_FW_MANIFEST_MAGIC;
+    manifest.manifestVersion = 1;
+    manifest.fwVersion = job.stmFwVersion;
+    manifest.minBootloaderVersion = 1;
+    manifest.fwSize = static_cast<uint32_t>(received);
+
+    memcpy(manifest.sha256, dig.data(), sizeof(manifest.sha256));
+
+    manifest.flags = STM_FW_FLAG_SIGNATURE_REQUIRED;
+    manifest.signatureAlg = STM_FW_SIG_ECDSA_P256_SHA256;
+
+    // Signatur erstmal noch NICHT aus Server übernehmen,
+    // weil Server aktuell DER/Base64 liefert, Manifest aber raw64 erwartet.
+    memset(manifest.signature, 0, sizeof(manifest.signature));
+
+    if (!stmFwStorageWriteCandidateManifest(manifest)) {
+        ESP_LOGE(TAG, "failed to write STM candidate manifest");
+        remove("/stmfw/candidate.bin");
+        return false;
+    }
+
+    g_stmOtaCtx.source = StmOtaRequestSource::Server;
+    g_stmOtaCtx.jobId = job.job_id;
+    g_stmOtaCtx.fwVersion = job.stmFwVersion;
+    g_stmOtaCtx.rollback = false;
+    g_stmOtaCtx.signatureRequired = true;
+    g_stmOtaCtx.signaturePresent = false;
+
+    requestStagedStmOta();
+
+    ESP_LOGI(TAG, "STM server candidate staged and requested");
+
+    return true;
+}
+
 // Tuning
 static constexpr uint8_t  SENSOR_MAX_ATTEMPTS   = 5;
 static constexpr uint32_t SENSOR_BACKOFF_BASE_MS = 2000;
@@ -345,9 +537,38 @@ static void otaTask(void*) {
             job.sha256hex = msg.sha256hex;
             job.url = msg.url;
             job.signatureBase64 = msg.signatureBase64;
+            job.isStm = msg.isStm;
+            job.stmFwVersion = msg.stmFwVersion;
+
+            ESP_LOGI(TAG,
+            "TASK isStm=%d version=%" PRIu32,
+            job.isStm,
+            job.stmFwVersion);
 
             otaMgrSetRunning(true);
-            const bool ok = runOtaJob(job);
+            bool ok = false;
+
+            if (job.isStm) {
+                ESP_LOGI(TAG,
+                        "STM OTA server job received job=%llu version=%" PRIu32
+                        " url=%s size=%lld",
+                        (unsigned long long)job.job_id,
+                        job.stmFwVersion,
+                        job.url.c_str(),
+                        (long long)job.size);
+
+                g_stmOtaCtx.source = StmOtaRequestSource::Server;
+                g_stmOtaCtx.jobId = job.job_id;
+                g_stmOtaCtx.fwVersion = job.stmFwVersion;
+                g_stmOtaCtx.rollback = false;
+                g_stmOtaCtx.signatureRequired = false;
+                g_stmOtaCtx.signaturePresent = false;
+
+                ok = runServerStmOtaJob(job);
+            } else {
+                ok = runOtaJob(job);
+            }
+
             otaMgrSetRunning(false);
 
             otaRunning = false;
@@ -648,6 +869,16 @@ static bool runStagedStmOtaCandidate()
              stmOtaStateName(r.finalState),
              r.error ? r.error : "none");
 
+    ESP_LOGI(TAG,
+         "STM OTA AUDIT source=%s job=%llu version=%" PRIu32
+         " rollback=%d sig_required=%d sig_present=%d",
+         stmOtaSourceText(g_stmOtaCtx.source),
+         (unsigned long long)g_stmOtaCtx.jobId,
+         g_stmOtaCtx.fwVersion,
+         g_stmOtaCtx.rollback,
+         g_stmOtaCtx.signatureRequired,
+         g_stmOtaCtx.signaturePresent);
+
     if (r.ok && !r.rollbackUsed) {
         stmFwStorageClearCandidate();
         stmFwStorageClearCandidateManifest();
@@ -675,6 +906,15 @@ static bool runEmbeddedStmOtaDevTest()
              "STM embedded manifest: version=%" PRIu32 " size=%" PRIu32,
              img.manifest.fwVersion,
              img.manifest.fwSize);
+
+        g_stmOtaCtx.source =
+    StmOtaRequestSource::DevEmbedded;
+
+    g_stmOtaCtx.fwVersion = img.manifest.fwVersion;
+    g_stmOtaCtx.jobId = 0;
+    g_stmOtaCtx.rollback = false;
+    g_stmOtaCtx.signatureRequired = stmFwManifestRequiresSignature(img.manifest);
+    g_stmOtaCtx.signaturePresent = stmFwManifestHasSignature(img.manifest);
 
     if (!stageStmFirmwareCandidate(img.data, img.size, img.manifest)) {
         return false;
@@ -816,6 +1056,7 @@ static void ioTask(void*) {
 
                     postEvt(timeSynced ? CoreEvtType::TIME_SYNC_OK : CoreEvtType::TIME_SYNC_FAIL);
                 }
+              
 
                 if (timeSynced && !tlsProbed) {
                     tlsProbed = true;
@@ -880,10 +1121,17 @@ static void ioTask(void*) {
                         msg.job_id = job.job_id;
                         msg.file_id = job.file_id;
                         msg.size = job.size;
+                        msg.isStm = job.isStm;
+                        msg.stmFwVersion = job.stmFwVersion;
                         copyStr(msg.name, sizeof(msg.name), job.name);
                         copyStr(msg.sha256hex, sizeof(msg.sha256hex), job.sha256hex);
                         copyStr(msg.url, sizeof(msg.url), job.url);
                         copyStr(msg.signatureBase64, sizeof(msg.signatureBase64), job.signatureBase64);
+
+                        ESP_LOGI(TAG,
+                        "QUEUE isStm=%d version=%" PRIu32,
+                        msg.isStm,
+                        msg.stmFwVersion);
 
                         ESP_LOGI(TAG, "QUEUE job url=%s", msg.url);
 

@@ -25,7 +25,8 @@ extern "C" {
 namespace {
 static const char* TAG = "ota_client";
 
-static bool parseJobFromJson(const std::string& body, OtaJob& out) {
+static bool parseJobFromJson(const std::string& body, OtaJob& out)
+{
     cJSON* root = cJSON_Parse(body.c_str());
     if (!root) {
         ESP_LOGW(TAG, "poll: invalid json");
@@ -41,13 +42,15 @@ static bool parseJobFromJson(const std::string& body, OtaJob& out) {
             break;
         }
 
-        cJSON* jobIdItem  = cJSON_GetObjectItemCaseSensitive(job, "job_id");
-        cJSON* fileIdItem = cJSON_GetObjectItemCaseSensitive(job, "file_id");
-        cJSON* nameItem   = cJSON_GetObjectItemCaseSensitive(job, "name");
-        cJSON* sizeItem   = cJSON_GetObjectItemCaseSensitive(job, "size");
-        cJSON* shaItem    = cJSON_GetObjectItemCaseSensitive(job, "sha256");
-        cJSON* urlItem    = cJSON_GetObjectItemCaseSensitive(job, "url");
-        cJSON* sigItem    = cJSON_GetObjectItemCaseSensitive(job, "signature");
+        cJSON* jobIdItem     = cJSON_GetObjectItemCaseSensitive(job, "job_id");
+        cJSON* fileIdItem    = cJSON_GetObjectItemCaseSensitive(job, "file_id");
+        cJSON* nameItem      = cJSON_GetObjectItemCaseSensitive(job, "name");
+        cJSON* sizeItem      = cJSON_GetObjectItemCaseSensitive(job, "size");
+        cJSON* shaItem       = cJSON_GetObjectItemCaseSensitive(job, "sha256");
+        cJSON* urlItem       = cJSON_GetObjectItemCaseSensitive(job, "url");
+        cJSON* sigItem       = cJSON_GetObjectItemCaseSensitive(job, "signature");
+        cJSON* targetItem    = cJSON_GetObjectItemCaseSensitive(job, "target");
+        cJSON* fwVersionItem = cJSON_GetObjectItemCaseSensitive(job, "fw_version");
 
         if (!cJSON_IsNumber(jobIdItem) ||
             !cJSON_IsNumber(fileIdItem) ||
@@ -60,6 +63,17 @@ static bool parseJobFromJson(const std::string& body, OtaJob& out) {
             break;
         }
 
+        std::string target;
+        if (cJSON_IsString(targetItem) && targetItem->valuestring) {
+            target = targetItem->valuestring;
+        }
+
+        uint32_t stmFwVersion = 0;
+        if (cJSON_IsNumber(fwVersionItem)) {
+            stmFwVersion =
+                static_cast<uint32_t>(fwVersionItem->valuedouble);
+        }
+
         out.job_id = static_cast<uint64_t>(jobIdItem->valuedouble);
         out.file_id = static_cast<uint64_t>(fileIdItem->valuedouble);
         out.name = nameItem->valuestring ? nameItem->valuestring : "";
@@ -67,6 +81,15 @@ static bool parseJobFromJson(const std::string& body, OtaJob& out) {
         out.sha256hex = shaItem->valuestring ? shaItem->valuestring : "";
         out.url = urlItem->valuestring ? urlItem->valuestring : "";
         out.signatureBase64 = sigItem->valuestring ? sigItem->valuestring : "";
+
+        out.isStm = (target == "stm32");
+        out.stmFwVersion = stmFwVersion;
+
+        ESP_LOGI(TAG,
+                 "PARSE target=%s isStm=%d version=%" PRIu32,
+                 target.c_str(),
+                 out.isStm,
+                 out.stmFwVersion);
 
         if (out.name.empty() ||
             out.sha256hex.empty() ||

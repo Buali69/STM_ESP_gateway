@@ -18,7 +18,6 @@ bool stmFwStorageInit()
     conf.base_path = BASE_PATH;
     conf.partition_label = PARTITION_LABEL;
     conf.partition = nullptr;
-    conf.blockdev = nullptr;
     conf.format_if_mount_failed = true;
     conf.dont_mount = false;
     conf.read_only = false;

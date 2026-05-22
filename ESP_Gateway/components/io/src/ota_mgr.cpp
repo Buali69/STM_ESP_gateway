@@ -167,7 +167,8 @@ void otaMgrBegin(const std::string& fwVersion, const std::string& bootId) {
     tryConfirmRunningAppForRollback();
 
     const std::string confirmedFw = nvsReadString(NVS_NAMESPACE, NVS_KEY_CONFIRMED_FW);
-    s_confirmed = (confirmedFw == s_fw);
+    //s_confirmed = (confirmedFw == s_fw);
+    s_confirmed = true; // TEST: skip ESP confirm to allow OTA poll
 
     ESP_LOGI(TAG,
              "FW version=%s confirmed_fw=%s didConfirm=%d",

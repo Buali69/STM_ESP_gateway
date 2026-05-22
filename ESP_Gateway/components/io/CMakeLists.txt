@@ -35,7 +35,5 @@ idf_component_register(
         esp_event
         esp_wifi
         lwip
-        esp_driver_uart
-        esp_driver_gpio
         littlefs
 )

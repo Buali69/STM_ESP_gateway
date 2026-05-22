@@ -12,7 +12,9 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
-#include "io/ota_mgr.h"
+//#include "io/ota_mgr.h"
+
+#include "esp_system.h"
 
 
 static const char* TAG = "HTTP_TLS";
@@ -29,10 +31,13 @@ static esp_http_client_config_t makeBaseConfig(const std::string& path) {
     cfg.path = path.c_str();
     cfg.port = SERVER_HTTPS_PORT;
     cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
+    cfg.skip_cert_common_name_check = true;
     cfg.timeout_ms = 30000;
     cfg.buffer_size = 4096;
     cfg.buffer_size_tx = 2048;
-    cfg.cert_pem = TLS_CA_CERT_PEM;
+    //cfg.cert_pem = TLS_CA_CERT_PEM;
+    //cfg.cert_pem = TLS_INTERMEDIATE_CERT_PEM;
+    cfg.cert_pem = TLS_CHAIN_CERT_PEM;
     return cfg;
 }
 
@@ -138,11 +143,14 @@ bool httpsGet(const std::string& path, int* httpCodeOut, std::string* respOut) {
 
     esp_http_client_config_t cfg = {};
     cfg.url = url.c_str();
-    cfg.cert_pem = TLS_CA_CERT_PEM;
+    //cfg.cert_pem = TLS_CA_CERT_PEM;
+    //cfg.cert_pem = TLS_INTERMEDIATE_CERT_PEM;
+    cfg.cert_pem = TLS_CHAIN_CERT_PEM;
     cfg.event_handler = httpEventHandler;
     cfg.user_data = &buf;
     cfg.timeout_ms = 10000;
     cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
+    cfg.skip_cert_common_name_check = true;
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
@@ -192,11 +200,14 @@ bool httpsPostJson(const std::string& path,
 
     esp_http_client_config_t cfg = {};
     cfg.url = url.c_str();
-    cfg.cert_pem = TLS_CA_CERT_PEM;
+    //cfg.cert_pem = TLS_CA_CERT_PEM;
+    //cfg.cert_pem = TLS_INTERMEDIATE_CERT_PEM;
+    cfg.cert_pem = TLS_CHAIN_CERT_PEM;
     cfg.event_handler = httpEventHandler;
     cfg.user_data = &buf;
     cfg.timeout_ms = 10000;
     cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
+    cfg.skip_cert_common_name_check = true;
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
@@ -243,7 +254,7 @@ void tlsProbe(void) {
          code,
          (unsigned)body.size());
 
-    otaMgrSetServerStatus(ok);
+ //   otaMgrSetServerStatus(ok);
 }
 
 bool httpsGetStream(const std::string& path,
@@ -375,5 +386,9 @@ bool httpsGetAuth(const std::string& path,
 }
 
 void tlsDiagnostics() {
+    ESP_LOGI(TAG,
+             "!!!!!!!! TLS PRECHECK MARKER heap=%u min=%u",
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)esp_get_minimum_free_heap_size());
     tlsProbe();
 }

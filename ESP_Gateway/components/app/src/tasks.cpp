@@ -369,6 +369,141 @@ static StmOtaResult runStmOtaUpdateManaged(const uint8_t* fwData, uint32_t fwSiz
     return result;
 }
 
+static bool base64DecodeStd(const std::string& in, std::vector<uint8_t>& out)
+{
+    static const char* tbl =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    out.clear();
+
+    int val = 0;
+    int valb = -8;
+
+    for (unsigned char c : in) {
+        if (c == '=') {
+            break;
+        }
+
+        const char* p = strchr(tbl, c);
+        if (!p) {
+            return false;
+        }
+
+        val = (val << 6) + static_cast<int>(p - tbl);
+        valb += 6;
+
+        if (valb >= 0) {
+            out.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+
+    return true;
+}
+
+static bool readDerInteger32(
+    const uint8_t*& p,
+    const uint8_t* end,
+    uint8_t out32[32]
+)
+{
+    if (p >= end || *p++ != 0x02) {
+        return false;
+    }
+
+    if (p >= end) {
+        return false;
+    }
+
+    size_t len = *p++;
+
+    if (len == 0 || p + len > end) {
+        return false;
+    }
+
+    // DER integer may contain leading 0x00 for positive sign.
+    while (len > 32 && *p == 0x00) {
+        ++p;
+        --len;
+    }
+
+    if (len > 32) {
+        return false;
+    }
+
+    memset(out32, 0, 32);
+    memcpy(out32 + (32 - len), p, len);
+
+    p += len;
+    return true;
+}
+
+static bool decodeEcdsaDerSignatureToRaw64(
+    const std::string& b64,
+    uint8_t out[64]
+)
+{
+    if (!out || b64.empty()) {
+        return false;
+    }
+
+    std::vector<uint8_t> der;
+
+    if (!base64DecodeStd(b64, der)) {
+        ESP_LOGE(TAG, "signature base64 decode failed");
+        return false;
+    }
+
+    if (der.size() < 8) {
+        ESP_LOGE(TAG, "DER signature too short");
+        return false;
+    }
+
+    const uint8_t* p = der.data();
+    const uint8_t* end = der.data() + der.size();
+
+    if (*p++ != 0x30) {
+        ESP_LOGE(TAG, "DER signature missing sequence");
+        return false;
+    }
+
+    if (p >= end) {
+        return false;
+    }
+
+    size_t seqLen = *p++;
+
+    if (seqLen & 0x80) {
+        const size_t n = seqLen & 0x7F;
+        if (n == 0 || n > 2 || p + n > end) {
+            return false;
+        }
+
+        seqLen = 0;
+        for (size_t i = 0; i < n; ++i) {
+            seqLen = (seqLen << 8) | *p++;
+        }
+    }
+
+    if (p + seqLen > end) {
+        ESP_LOGE(TAG, "DER sequence length invalid");
+        return false;
+    }
+
+    if (!readDerInteger32(p, end, out)) {
+        ESP_LOGE(TAG, "DER r decode failed");
+        return false;
+    }
+
+    if (!readDerInteger32(p, end, out + 32)) {
+        ESP_LOGE(TAG, "DER s decode failed");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "DER ECDSA signature converted to raw64");
+    return true;
+}
+
 static bool runServerStmOtaJob(const OtaJob& job)
 {
     ESP_LOGI(TAG,
@@ -492,7 +627,16 @@ static bool runServerStmOtaJob(const OtaJob& job)
 
     // Signatur erstmal noch NICHT aus Server übernehmen,
     // weil Server aktuell DER/Base64 liefert, Manifest aber raw64 erwartet.
-    memset(manifest.signature, 0, sizeof(manifest.signature));
+    //memset(manifest.signature, 0, sizeof(manifest.signature));
+
+    if (!decodeEcdsaDerSignatureToRaw64(job.signatureBase64, manifest.signature)) {
+        ESP_LOGE(TAG, "failed to decode STM signature");
+        remove("/stmfw/candidate.bin");
+        return false;
+    }    
+
+    g_stmOtaCtx.signatureRequired = true;
+    g_stmOtaCtx.signaturePresent = true;
 
     if (!stmFwStorageWriteCandidateManifest(manifest)) {
         ESP_LOGE(TAG, "failed to write STM candidate manifest");

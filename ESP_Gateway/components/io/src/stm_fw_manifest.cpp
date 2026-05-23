@@ -1,6 +1,7 @@
 #include "io/stm_fw_manifest.h"
 #include <string.h>
 #include "psa/crypto.h"
+#include "esp_log.h"
 
 constexpr uint32_t STM_FW_MANIFEST_MAGIC = 0x53544D46; // STMF
 
@@ -101,6 +102,16 @@ bool stmFwManifestComputeSignedHash(
 
     memcpy(&buf[pos], manifest.sha256, 32);
     pos += 32;
+
+    ESP_LOGI("stm_fw_manifest",
+         "VERIFY signedBytes len=%u",
+         (unsigned)pos);
+
+    ESP_LOG_BUFFER_HEX_LEVEL(
+        "stm_fw_manifest",
+        buf,
+        pos,
+        ESP_LOG_INFO);
 
     static bool psaReady = false;
 

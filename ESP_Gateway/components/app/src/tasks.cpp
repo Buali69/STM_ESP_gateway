@@ -44,6 +44,8 @@
 
 #include "esp_system.h"
 
+#define ENABLE_LEGACY_STM_OTA_DIRECT 0 
+
 namespace {
 static volatile bool g_stmOtaDevRequested = false; //true;
 static volatile bool g_stmOtaStagedRequested = false;
@@ -634,10 +636,7 @@ static bool runServerStmOtaJob(const OtaJob& job)
         remove("/stmfw/candidate.bin");
         return false;
     }    
-
-    g_stmOtaCtx.signatureRequired = true;
-    g_stmOtaCtx.signaturePresent = true;
-
+   
     if (!stmFwStorageWriteCandidateManifest(manifest)) {
         ESP_LOGE(TAG, "failed to write STM candidate manifest");
         remove("/stmfw/candidate.bin");
@@ -649,7 +648,7 @@ static bool runServerStmOtaJob(const OtaJob& job)
     g_stmOtaCtx.fwVersion = job.stmFwVersion;
     g_stmOtaCtx.rollback = false;
     g_stmOtaCtx.signatureRequired = true;
-    g_stmOtaCtx.signaturePresent = false;
+    g_stmOtaCtx.signaturePresent = true;
 
     requestStagedStmOta();
 
@@ -773,6 +772,7 @@ static bool sendStmFirmware(const uint8_t* fwData, uint32_t fwSize)
     return ok;
 }
 
+#if ENABLE_LEGACY_STM_OTA_DIRECT
 static bool runStmOtaUpdate(const uint8_t* fwData, uint32_t fwSize)
 {
     bool ok = true;
@@ -808,6 +808,7 @@ static bool runStmOtaUpdate(const uint8_t* fwData, uint32_t fwSize)
     stm32UartProcess();
     vTaskDelay(pdMS_TO_TICKS(10));
 }
+
 
 if (!stm32IsOtaReady()) {
         ESP_LOGE(TAG, "STM bootloader OTA_READY timeout");
@@ -931,6 +932,7 @@ if (!stm32IsOtaReady()) {
     ESP_LOGI(TAG, "=== STM FW TRANSFER TEST DONE ok=%d ===", ok);
     return ok;
 }
+#endif
 
 static bool stageStmFirmwareCandidate(const uint8_t* fwData, uint32_t fwSize, const StmFwManifest& manifest)
 {
